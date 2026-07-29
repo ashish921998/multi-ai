@@ -37,7 +37,13 @@ export interface RoomStateResponse {
     isSelf: boolean;
   }[];
   messages: RoomStateMessage[];
-  agent: { active: boolean; connectionId?: string; connectorDisplayName?: string; lastHeartbeatAt?: string };
+  agent: {
+    active: boolean;
+    connectionId?: string;
+    connectorDisplayName?: string;
+    lastHeartbeatAt?: string;
+    supportsVision?: boolean;
+  };
   boundarySeq: number;
   handoffStatus: string | null;
 }

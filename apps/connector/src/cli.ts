@@ -72,6 +72,7 @@ async function main(): Promise<void> {
       scheduler: new RealScheduler(),
       roomId,
       connectionCode,
+      supportsVision: process.env.ROOM_AGENT_SUPPORTS_VISION === "true",
       pollIntervalMs: POLL_INTERVAL_MS,
       stopSignal: controller.signal,
       log,

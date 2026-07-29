@@ -32,10 +32,10 @@ export class HttpRoomAgentClient implements RoomAgentClient {
     return this.#supabase;
   }
 
-  async connect(roomId: string, connectionCode: string): Promise<ConnectResult> {
+  async connect(roomId: string, connectionCode: string, supportsVision: boolean): Promise<ConnectResult> {
     const r = await post<{ agentConnectionId: string; roomId: string; boundarySeq: number; heartbeatIntervalMs: number }>(
       "agent-connect",
-      { roomId, connectionCode },
+      { roomId, connectionCode, supportsVision },
     );
     this.#agentConnectionId = r.agentConnectionId;
     return r;

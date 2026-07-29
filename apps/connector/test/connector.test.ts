@@ -90,6 +90,7 @@ function baseDeps(client: RoomAgentClient, responder: AgentResponder) {
       scheduler: new FakeScheduler(),
       roomId: "ROOM1",
       connectionCode: "ABCD-2345",
+      supportsVision: false,
       pollIntervalMs: 5000,
       stopSignal: controller.signal,
       log: () => {},

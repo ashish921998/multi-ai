@@ -57,6 +57,7 @@ FUNCTIONS_URL=http://localhost:54321/functions/v1 \
 SUPABASE_URL=http://localhost:54321 \
 SUPABASE_ANON_KEY=<anon-key> \
 ROOM_AGENT_COMMAND='cat' \                     # or point at your agent
+ROOM_AGENT_SUPPORTS_VISION=false \            # true if the model reads images
 pnpm --filter @multi-ai/connector dev connect ROOM1234 ABCD-2345
 ```
 

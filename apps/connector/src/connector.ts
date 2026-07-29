@@ -40,7 +40,7 @@ export interface RespondOptions {
  * calls the Supabase Edge Functions; tests inject a fake.
  */
 export interface RoomAgentClient {
-  connect(roomId: string, connectionCode: string): Promise<ConnectResult>;
+  connect(roomId: string, connectionCode: string, supportsVision: boolean): Promise<ConnectResult>;
   fetchHandoff(agentConnectionId: string): Promise<PendingHandoff>;
   respond(agentConnectionId: string, handoffId: string, opts: RespondOptions): Promise<void>;
   heartbeat(agentConnectionId: string): Promise<void>;
@@ -67,6 +67,7 @@ export interface ConnectorDeps {
   scheduler: Scheduler;
   roomId: string;
   connectionCode: string;
+  supportsVision: boolean;
   pollIntervalMs: number;
   stopSignal: AbortSignal;
   log: (message: string) => void;
@@ -78,9 +79,9 @@ export interface ConnectorDeps {
  * possible.
  */
 export async function runConnector(deps: ConnectorDeps): Promise<void> {
-  const { client, responder, scheduler, stopSignal, log, roomId, connectionCode } = deps;
+  const { client, responder, scheduler, stopSignal, log, roomId, connectionCode, supportsVision } = deps;
 
-  const result = await client.connect(roomId, connectionCode);
+  const result = await client.connect(roomId, connectionCode, supportsVision);
   const agentConnectionId = result.agentConnectionId;
   log(`Connected to room ${result.roomId} as the active agent.`);
 

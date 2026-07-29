@@ -2,8 +2,6 @@ import { preflight } from "../_shared/cors.ts";
 import { json, errorResponse } from "../_shared/response.ts";
 import { adminClient } from "../_shared/supabase.ts";
 import { requireSession } from "../_shared/session.ts";
-import { DEFAULT_LEASE_CONFIG } from "../../../packages/shared/src/index.ts";
-import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 
 interface RoomStateRequest {
   roomId?: string;
@@ -32,7 +30,7 @@ export default async (req: Request): Promise<Response> => {
   if (!room) return errorResponse(404, "Room not found.");
 
   // Expire the active agent lease if its heartbeats have gone silent.
-  await reapStaleAgent(client, roomId);
+  await client.rpc("reap_stale_agent", { p_room_id: roomId });
 
   const [{ data: participants }, { data: messages }] = await Promise.all([
     client
@@ -59,7 +57,7 @@ export default async (req: Request): Promise<Response> => {
 
   const { data: activeAgent } = await client
     .from("agent_connections")
-    .select("id, participant_id, last_heartbeat_at, created_at")
+    .select("id, participant_id, last_heartbeat_at, created_at, supports_vision")
     .eq("room_id", roomId)
     .eq("status", "active")
     .maybeSingle();
@@ -115,27 +113,10 @@ export default async (req: Request): Promise<Response> => {
           connectionId: activeAgent.id,
           connectorDisplayName: connector?.display_name ?? null,
           lastHeartbeatAt: activeAgent.last_heartbeat_at,
+          supportsVision: Boolean(activeAgent.supports_vision),
         }
-      : { active: false },
+      : { active: false, supportsVision: false },
     boundarySeq: latestHandoff?.boundary_seq ?? 0,
     handoffStatus: latestHandoff?.status ?? null,
   });
 };
-
-/** Marks a timed-out active agent connection as disconnected. */
-async function reapStaleAgent(client: SupabaseClient, roomId: string) {
-  const { data: active } = await client
-    .from("agent_connections")
-    .select("id, last_heartbeat_at")
-    .eq("room_id", roomId)
-    .eq("status", "active")
-    .maybeSingle();
-  if (!active) return;
-  const ageMs = Date.now() - new Date(active.last_heartbeat_at as string).getTime();
-  if (ageMs > DEFAULT_LEASE_CONFIG.heartbeatTimeoutMs) {
-    await client
-      .from("agent_connections")
-      .update({ status: "disconnected", released_at: new Date().toISOString() })
-      .eq("id", active.id);
-  }
-}

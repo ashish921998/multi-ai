@@ -4,7 +4,7 @@ import { api } from "../api.ts";
 import { sessionStore, type RoomSession } from "../session.ts";
 import { useRoom } from "../useRoom.ts";
 import { ScreenshotImg } from "../components/ScreenshotImg.tsx";
-import type { ConnectCodeResponse, RoomStateMessage } from "../api.ts";
+import type { ConnectCodeResponse, RoomStateMessage, RoomStateResponse } from "../api.ts";
 
 export function Room() {
   const params = useParams();
@@ -239,6 +239,7 @@ function RoomView(props: {
         {/* RIGHT: discussion + composer */}
         <aside className="pane discussion">
           <span className="kicker muted">DISCUSSION · {data?.messages.length ?? 0}</span>
+          {visionWarning(data) && <div className="banner warn">{visionWarning(data)}</div>}
           <div className="messages">
             {(data?.messages ?? []).map((m) => (
               <Message key={m.id} m={m} me={props.session.participantId} nameMap={nameMap} signedUrlFor={signedUrlFor} />
@@ -430,6 +431,14 @@ function authorName(m: RoomStateMessage, me: string, nameMap: Map<string, string
   if (m.authorParticipantId === me) return "You";
   if (m.authorParticipantId) return nameMap.get(m.authorParticipantId) ?? "Participant";
   return "Someone";
+}
+
+/** Returns a vision-capability warning when the active agent can't see screenshots (issue 0005). */
+function visionWarning(data: RoomStateResponse | null): string | null {
+  if (!data || !data.agent.active || data.agent.supportsVision) return null;
+  const hasShots = data.messages.some((m) => m.screenshots.length > 0);
+  if (!hasShots) return null;
+  return "The connected Pi model does not receive images, so screenshots are shared with the room but not with Pi.";
 }
 
 function initials(name: string): string {

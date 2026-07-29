@@ -2,6 +2,7 @@ import { preflight } from "../_shared/cors.ts";
 import { json, errorResponse } from "../_shared/response.ts";
 import { adminClient } from "../_shared/supabase.ts";
 import { consumeRate, hashKey } from "../_shared/ratelimit.ts";
+import { sha256Hex } from "../_shared/hash.ts";
 import {
   DEFAULT_RATE_LIMITS,
   generateParticipantId,
@@ -12,12 +13,6 @@ interface JoinRoomRequest {
   roomId?: string;
   password?: string;
   displayName?: string;
-}
-
-async function sha256Hex(value: string): Promise<string> {
-  const data = new TextEncoder().encode(value);
-  const digest = await crypto.subtle.digest("SHA-256", data);
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 function clientIp(req: Request): string {
@@ -47,15 +42,6 @@ export default async (req: Request): Promise<Response> => {
   const ipHash = await hashKey(ip);
   const client = adminClient();
 
-  // 5 failed password attempts per IP per minute (issue 0007).
-  const allowed = await consumeRate(
-    client,
-    "join_fail",
-    ipHash,
-    DEFAULT_RATE_LIMITS.failedPasswordPerIpPerMinute,
-  );
-  if (!allowed) return errorResponse(429, "Too many attempts from this network. Try again in a minute.");
-
   const { data: room } = await client
     .from("rooms")
     .select("id, title, password_hash, expires_at")
@@ -71,7 +57,19 @@ export default async (req: Request): Promise<Response> => {
     salt: string;
     iterations: number;
   });
-  if (!passwordOk) return errorResponse(401, "Incorrect room password.");
+  if (!passwordOk) {
+    // 5 failed password attempts per IP per minute (issue 0007). Consumed only
+    // on an actual failure, so legitimate joins never burn the failure budget.
+    const allowed = await consumeRate(
+      client,
+      "join_fail",
+      ipHash,
+      DEFAULT_RATE_LIMITS.failedPasswordPerIpPerMinute,
+    );
+    return allowed
+      ? errorResponse(401, "Incorrect room password.")
+      : errorResponse(429, "Too many attempts from this network. Try again in a minute.");
+  }
 
   // Enforce 10 participants per room (issue 0007).
   const { count } = await client
@@ -82,7 +80,6 @@ export default async (req: Request): Promise<Response> => {
     return errorResponse(409, "This room is full (10 participants).");
   }
 
-  // A display name must be unique within the room.
   const sessionToken = generateParticipantId() + "." + (await sha256Hex(cryptoRandom()));
   const sessionTokenHash = await sha256Hex(sessionToken);
   const participantId = generateParticipantId();

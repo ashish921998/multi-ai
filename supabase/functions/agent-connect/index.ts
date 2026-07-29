@@ -3,7 +3,7 @@ import { json, errorResponse } from "../_shared/response.ts";
 import { adminClient } from "../_shared/supabase.ts";
 import { broadcast, roomChannel } from "../_shared/realtime.ts";
 import {
-  DEFAULT_LEASE_CONFIG,
+  HEARTBEAT_INTERVAL_MS,
   canAcquireActiveSlot,
   normalizeConnectionCode,
   verifyConnectionCode,
@@ -12,6 +12,8 @@ import {
 interface AgentConnectRequest {
   roomId?: string;
   connectionCode?: string;
+  /** Whether the connecting model can receive image inputs (issue 0005). */
+  supportsVision?: boolean;
 }
 
 export default async (req: Request): Promise<Response> => {
@@ -22,6 +24,7 @@ export default async (req: Request): Promise<Response> => {
   const body = (await req.json().catch(() => ({}))) as AgentConnectRequest;
   const roomId = body.roomId?.trim().toUpperCase();
   const rawCode = normalizeConnectionCode(body.connectionCode ?? "");
+  const supportsVision = body.supportsVision === true;
   if (!roomId || rawCode.length === 0) {
     return errorResponse(400, "roomId and connectionCode are required.");
   }
@@ -53,8 +56,10 @@ export default async (req: Request): Promise<Response> => {
   }
   if (!connection) return errorResponse(401, "Invalid connection code.");
 
-  // Enforce the single-active-agent rule (issue 0006).
-  const { data: activeHolder } = await client
+  // Reap any timed-out holder, then enforce the single-active-agent rule.
+  await client.rpc("reap_stale_agent", { p_room_id: roomId });
+
+  const { data: holder } = await client
     .from("agent_connections")
     .select("id, last_heartbeat_at")
     .eq("room_id", roomId)
@@ -62,33 +67,15 @@ export default async (req: Request): Promise<Response> => {
     .maybeSingle();
 
   const now = Date.now();
-  if (activeHolder) {
-    // Reap a timed-out holder so takeover is possible.
-    const ageMs = now - new Date(activeHolder.last_heartbeat_at as string).getTime();
-    if (ageMs > DEFAULT_LEASE_CONFIG.heartbeatTimeoutMs) {
-      await client
-        .from("agent_connections")
-        .update({ status: "disconnected", released_at: new Date().toISOString() })
-        .eq("id", activeHolder.id);
-    }
-  }
-
-  const { data: holderAfterReap } = await client
-    .from("agent_connections")
-    .select("id, last_heartbeat_at")
-    .eq("room_id", roomId)
-    .eq("status", "active")
-    .maybeSingle();
-
   const decision = canAcquireActiveSlot(
-    holderAfterReap
+    holder
       ? {
-          id: holderAfterReap.id as string,
+          id: holder.id as string,
           roomId,
           participantId: "",
           connectionCode: "",
           status: "active",
-          lastHeartbeatAt: new Date(holderAfterReap.last_heartbeat_at as string).getTime(),
+          lastHeartbeatAt: new Date(holder.last_heartbeat_at as string).getTime(),
           createdAt: 0,
           releasedAt: null,
         }
@@ -100,12 +87,13 @@ export default async (req: Request): Promise<Response> => {
     return errorResponse(409, "Another Pi is already active in this room. Try again once it disconnects.");
   }
 
-  // Acquire the slot.
+  // Acquire the slot and record whether this model can receive images.
   const { error } = await client
     .from("agent_connections")
     .update({
       status: "active",
       last_heartbeat_at: new Date(now).toISOString(),
+      supports_vision: supportsVision,
     })
     .eq("id", connection.id);
   if (error) {
@@ -113,7 +101,6 @@ export default async (req: Request): Promise<Response> => {
     return errorResponse(500, "Could not activate the connection.");
   }
 
-  // Latest handoff boundary tells the connector where the room's context starts.
   const { data: latestHandoff } = await client
     .from("handoffs")
     .select("boundary_seq")
@@ -128,6 +115,6 @@ export default async (req: Request): Promise<Response> => {
     agentConnectionId: connection.id,
     roomId,
     boundarySeq: latestHandoff?.boundary_seq ?? 0,
-    heartbeatIntervalMs: 10000,
+    heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
   });
 };

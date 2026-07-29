@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { consumeWindow, RATE_WINDOW_MS } from "../../../packages/shared/src/index.ts";
+import { sha256Hex } from "./hash.ts";
 
 /**
  * Consumes one unit from a per-window rate-limit counter stored in
@@ -48,8 +49,4 @@ export async function consumeRate(
 }
 
 /** SHA-256 hex of a string, used to key rate buckets by IP without storing it. */
-export async function hashKey(value: string): Promise<string> {
-  const data = new TextEncoder().encode(value);
-  const digest = await crypto.subtle.digest("SHA-256", data);
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
+export const hashKey = sha256Hex;
