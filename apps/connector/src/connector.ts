@@ -26,7 +26,13 @@ export interface PendingHandoff {
   body?: string;
   includedSeqs?: number[];
   hasVisionContent?: boolean;
-  screenshots?: Array<{ messageId: string; mime: string; signedUrl: string }>;
+  screenshots?: Array<{
+    messageId: string;
+    mime: string;
+    signedUrl: string;
+    width?: number;
+    height?: number;
+  }>;
 }
 
 export interface RespondOptions {

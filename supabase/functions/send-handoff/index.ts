@@ -37,7 +37,10 @@ export default async (req: Request): Promise<Response> => {
   }
 
   // Retry path: a previously failed handoff can be re-sent with the same batch
-  // of messages (issue 0003) without duplicating them in the timeline.
+  // of messages (issue 0003) without duplicating them in the timeline. The
+  // one_active_handoff_per_room index (review #4) makes the reset-to-pending
+  // safe under concurrency: if another handoff is now in flight, this raises
+  // SQLSTATE 23505, mapped to a 409.
   const { data: failed } = await client
     .from("handoffs")
     .select("id")
@@ -47,10 +50,13 @@ export default async (req: Request): Promise<Response> => {
     .limit(1)
     .maybeSingle();
   if (failed) {
-    await client
+    const { error: retryError } = await client
       .from("handoffs")
       .update({ status: "pending", agent_connection_id: agent.id, agent_message_id: null })
       .eq("id", failed.id);
+    if (retryError?.code === "23505") {
+      return errorResponse(409, "A handoff to the agent is already in progress.");
+    }
     await broadcast(agentChannel(agent.id), "handoff", { handoffId: failed.id }).catch(() => {});
     return json({ handoffId: failed.id, retry: true });
   }
@@ -99,6 +105,11 @@ export default async (req: Request): Promise<Response> => {
     agent_connection_id: agent.id,
   });
   if (error) {
+    // A concurrent send-handoff won the race and inserted the room's one
+    // active handoff first (review #4).
+    if (error.code === "23505") {
+      return errorResponse(409, "A handoff to the agent is already in progress.");
+    }
     console.error("send-handoff insert failed", error);
     return errorResponse(500, "Could not start the handoff.");
   }

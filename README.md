@@ -40,12 +40,12 @@ Browsers ──HTTPS + realtime tickers──> Supabase cloud <──outbound─
 
 ```sh
 pnpm install                 # install all workspaces
-pnpm test                    # 68 tests across shared / web / connector
+pnpm test                    # 72 tests across shared / web / connector
 pnpm typecheck               # tsc --noEmit for every workspace
 
 # Backend (needs Docker for the local Supabase stack):
 supabase start
-supabase db reset            # applies migrations/0001_init.sql
+supabase db reset            # applies migrations 0001–0003
 supabase functions serve --env-file .env.local
 
 # Browser app:
@@ -68,3 +68,25 @@ pnpm --filter @multi-ai/connector dev connect ROOM1234 ABCD-2345
   only opaque tickers. Reading message text or screenshots requires joining with
   the password.
 - Room data and screenshots are deleted 30 days after the room's last activity.
+
+## Hardening notes
+
+- **One-time connection codes.** A Pi connection code is consumed the instant it
+  activates (`agent_connections.consumed_at`); reuse returns `410`. After a Pi
+  disconnects, reconnecting requires a fresh code from the room.
+- **One handoff in flight per room** is enforced at the database level
+  (`one_active_handoff_per_room` partial unique index), so two simultaneous
+  "Send to agent" clicks cannot both start.
+- **Scheduled cleanup.** `pg_cron` runs `delete_expired_rooms()` hourly at :03,
+  which deletes expired rooms' rows **and** their screenshot storage objects.
+  The `cleanup` Edge Function is kept for manual runs.
+- **Vision images reach the agent.** When `ROOM_AGENT_SUPPORTS_VISION=true`, the
+  connector downloads each handoff screenshot to a temp file and appends its
+  path to the agent command's stdin; non-vision agents get a text-only handoff
+  with a limitation note, and the room shows a warning banner.
+- **Dependencies.** `react-router-dom` is pinned to `^7.18.2`, which patches the
+  advisories present in 6.30.4. The lone residual `react-router` advisory
+  (GHSA-qwww-vcr4-c8h2, RSC CSRF) requires React Server Components / data-router
+  server actions — this client-only app uses neither, and its fix
+  (`react-router@8.3.0`) requires React 19. Other `pnpm audit` findings
+  (vite/vitest/esbuild) are dev-only and not in the shipped bundle.

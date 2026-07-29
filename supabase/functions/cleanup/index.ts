@@ -2,35 +2,16 @@ import { preflight } from "../_shared/cors.ts";
 import { json } from "../_shared/response.ts";
 import { adminClient } from "../_shared/supabase.ts";
 
-// Scheduled cleanup: deletes rooms (and all cascading data, including screenshot
-// objects) that have been inactive for 30 days (issue 0004). Run on a schedule
-// via pg_cron or a cron-triggered Edge Function invocation.
+// Manual/ad-hoc cleanup trigger: deletes rooms (and all cascading data, plus
+// their screenshot storage objects) that have been inactive for 30 days
+// (issue 0004). On a live project this runs automatically on an hourly pg_cron
+// schedule (see migration 0003); this function exists for manual runs and for
+// environments without pg_cron.
 export default async (req: Request): Promise<Response> => {
   const preflightResponse = preflight(req);
   if (preflightResponse) return preflightResponse;
 
   const client = adminClient();
-
-  // Collect expired rooms' screenshot paths so we can delete the storage objects.
-  const { data: expired } = await client
-    .from("rooms")
-    .select("id")
-    .lt("last_activity_at", new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
-    .limit(500);
-
-  const roomIds = (expired ?? []).map((r) => r.id as string);
-  if (roomIds.length) {
-    const { data: shots } = await client
-      .from("screenshots")
-      .select("storage_path")
-      .in("room_id", roomIds);
-    const paths = (shots ?? []).map((s) => s.storage_path as string);
-    if (paths.length) {
-      await client.storage.from("screenshots").remove(paths).catch((e) => {
-        console.error("screenshot cleanup failed", e);
-      });
-    }
-  }
 
   const { data, error } = await client.rpc("delete_expired_rooms");
   if (error) {

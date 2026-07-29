@@ -31,12 +31,13 @@ export default async (req: Request): Promise<Response> => {
 
   const client = adminClient();
 
-  // Find the pending connection this code belongs to.
+  // Only codes that have never been consumed are eligible (review #1).
   const { data: pending } = await client
     .from("agent_connections")
-    .select("id, connection_code_hash, status")
+    .select("id, connection_code_hash")
     .eq("room_id", roomId)
     .eq("status", "disconnected")
+    .is("consumed_at", null)
     .order("created_at", { ascending: true });
   if (!pending || pending.length === 0) {
     return errorResponse(404, "No pending connection for this room. Generate a code in the room first.");
@@ -87,18 +88,33 @@ export default async (req: Request): Promise<Response> => {
     return errorResponse(409, "Another Pi is already active in this room. Try again once it disconnects.");
   }
 
-  // Acquire the slot and record whether this model can receive images.
-  const { error } = await client
+  // Atomically consume the code AND acquire the slot. The .is("consumed_at",
+  // null) guard makes a code single-use even under concurrent connects; the
+  // one_active_agent_per_room partial unique index is the backstop that
+  // prevents two active connections per room. If 0 rows come back, the code
+  // was consumed by a concurrent connect (review #1).
+  const { data: acquired, error } = await client
     .from("agent_connections")
     .update({
       status: "active",
       last_heartbeat_at: new Date(now).toISOString(),
       supports_vision: supportsVision,
+      consumed_at: new Date().toISOString(),
     })
-    .eq("id", connection.id);
+    .eq("id", connection.id)
+    .is("consumed_at", null)
+    .select("id")
+    .maybeSingle();
+
   if (error) {
+    if (error.code === "23505") {
+      return errorResponse(409, "Another Pi is already active in this room. Try again once it disconnects.");
+    }
     console.error("agent-connect acquire failed", error);
     return errorResponse(500, "Could not activate the connection.");
+  }
+  if (!acquired) {
+    return errorResponse(410, "This connection code has already been used. Generate a new one in the room.");
   }
 
   const { data: latestHandoff } = await client

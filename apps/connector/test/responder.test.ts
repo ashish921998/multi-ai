@@ -1,0 +1,71 @@
+import { describe, it, expect } from "vitest";
+import { CommandResponder, composeStdin } from "../src/responder.ts";
+
+// A 1×1 transparent PNG as a data URL — lets us test image download without a
+// network round-trip or a storage bucket.
+const ONE_PIXEL_PNG =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
+describe("CommandResponder", () => {
+  it("pipes the envelope body to the command's stdin", async () => {
+    const responder = new CommandResponder("cat");
+    const ac = new AbortController();
+    const out: string[] = [];
+
+    for await (const chunk of responder.stream(
+      { pending: true, handoffId: "h1", body: "# Plan\n\nDiscuss the API.", includedSeqs: [1] },
+      ac.signal,
+    )) {
+      out.push(chunk);
+    }
+
+    expect(out.join("")).toContain("# Plan");
+    expect(out.join("")).toContain("Discuss the API.");
+  });
+
+  it("downloads screenshots and appends their local file paths to stdin", async () => {
+    const responder = new CommandResponder("cat");
+    const ac = new AbortController();
+    const out: string[] = [];
+
+    for await (const chunk of responder.stream(
+      {
+        pending: true,
+        handoffId: "h1",
+        body: "# Plan\n\nSee the screenshot.",
+        includedSeqs: [1],
+        hasVisionContent: true,
+        screenshots: [
+          { messageId: "m1", mime: "image/png", width: 1, height: 1, signedUrl: ONE_PIXEL_PNG },
+        ],
+      },
+      ac.signal,
+    )) {
+      out.push(chunk);
+    }
+
+    const text = out.join("");
+    // Body is preserved.
+    expect(text).toContain("# Plan");
+    // The attachment manifest is present and points at a real .png file.
+    expect(text).toContain("--- Attachments");
+    expect(text).toMatch(/image-0\.png/);
+    expect(text).toContain("image/png");
+  });
+});
+
+describe("composeStdin", () => {
+  it("returns the body unchanged when there are no attachments", () => {
+    expect(composeStdin("hello", { files: [] })).toBe("hello");
+  });
+
+  it("lists each attachment path, mime, and dimensions", () => {
+    const stdin = composeStdin("body", {
+      files: [{ path: "/tmp/a.png", mime: "image/png", width: 2, height: 3 }],
+    });
+    expect(stdin.startsWith("body")).toBe(true);
+    expect(stdin).toContain("/tmp/a.png");
+    expect(stdin).toContain("image/png");
+    expect(stdin).toContain("2x3");
+  });
+});
