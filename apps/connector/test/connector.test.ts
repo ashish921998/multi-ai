@@ -1,0 +1,228 @@
+import { describe, it, expect, vi } from "vitest";
+import { runConnector, type RoomAgentClient, type AgentResponder } from "../src/connector.ts";
+
+/** Fake scheduler that records every registered interval so tests can tick them. */
+class FakeScheduler {
+  callbacks: Array<{ ms: number; fn: () => void }> = [];
+  every(ms: number, fn: () => void): () => void {
+    const entry = { ms, fn };
+    this.callbacks.push(entry);
+    return () => {
+      this.callbacks = this.callbacks.filter((c) => c !== entry);
+    };
+  }
+  tick(groupMs: number) {
+    for (const c of this.callbacks) if (c.ms === groupMs) c.fn();
+  }
+}
+
+function makeClient(overrides: Partial<RoomAgentClient> = {}): RoomAgentClient & {
+  calls: string[];
+  handoffListeners: Array<() => void>;
+  nextHandoff: () => void;
+} {
+  const calls: string[] = [];
+  const handoffListeners: Array<() => void> = [];
+  let pendingHandoff = {
+    pending: true,
+    handoffId: "handoff-1",
+    body: "# Room handoff\n\nNew discussion",
+    includedSeqs: [3],
+    hasVisionContent: false,
+    screenshots: [],
+  };
+  const base: RoomAgentClient = {
+    async connect() {
+      calls.push("connect");
+      return {
+        agentConnectionId: "conn-1",
+        roomId: "ROOM1",
+        boundarySeq: 0,
+        heartbeatIntervalMs: 10000,
+      };
+    },
+    async fetchHandoff() {
+      calls.push("fetch");
+      return pendingHandoff;
+    },
+    async respond(_id, _handoffId, opts) {
+      calls.push(`respond:${opts.chunk ? "chunk" : opts.complete ? "complete" : "failed"}`);
+    },
+    async heartbeat() {
+      calls.push("heartbeat");
+    },
+    async disconnect() {
+      calls.push("disconnect");
+    },
+    onHandoffSignal(handler) {
+      handoffListeners.push(handler);
+      return () => {};
+    },
+    ...overrides,
+  };
+  return Object.assign(base, {
+    calls,
+    handoffListeners,
+    nextHandoff: () => handoffListeners.forEach((h) => h()),
+  });
+}
+
+function chunkedResponder(chunks: string[], shouldThrow = false): AgentResponder {
+  return {
+    async *stream() {
+      if (shouldThrow) throw new Error("agent blew up");
+      for (const c of chunks) yield c;
+    },
+  };
+}
+
+function flush(): Promise<void> {
+  return new Promise((r) => setTimeout(r, 0));
+}
+
+function baseDeps(client: RoomAgentClient, responder: AgentResponder) {
+  const controller = new AbortController();
+  return {
+    controller,
+    deps: {
+      client,
+      responder,
+      scheduler: new FakeScheduler(),
+      roomId: "ROOM1",
+      connectionCode: "ABCD-2345",
+      pollIntervalMs: 5000,
+      stopSignal: controller.signal,
+      log: () => {},
+    },
+  };
+}
+
+describe("runConnector", () => {
+  it("connects, heartbeats on the interval, and disconnects on stop", async () => {
+    const client = makeClient();
+    const { controller, deps } = baseDeps(client, chunkedResponder(["a"]));
+    const scheduler = deps.scheduler as FakeScheduler;
+
+    const done = runConnector(deps);
+    await flush();
+
+    expect(client.calls).toContain("connect");
+    scheduler.tick(10000);
+    expect(client.calls.filter((c) => c === "heartbeat")).toHaveLength(1);
+    scheduler.tick(10000);
+    expect(client.calls.filter((c) => c === "heartbeat")).toHaveLength(2);
+
+    controller.abort();
+    await done;
+    expect(client.calls).toContain("disconnect");
+  });
+
+  it("streams a handoff to the responder and completes it", async () => {
+    const client = makeClient();
+    const { controller, deps } = baseDeps(client, chunkedResponder(["Hello ", "world"]));
+
+    const done = runConnector(deps);
+    await flush();
+
+    client.nextHandoff();
+    await flush();
+
+    expect(client.calls).toContain("fetch");
+    expect(client.calls.filter((c) => c === "respond:chunk")).toHaveLength(2);
+    expect(client.calls).toContain("respond:complete");
+
+    controller.abort();
+    await done;
+  });
+
+  it("marks the handoff failed when the responder throws", async () => {
+    const client = makeClient();
+    const { controller, deps } = baseDeps(client, chunkedResponder([], true));
+
+    const done = runConnector(deps);
+    await flush();
+
+    client.nextHandoff();
+    await flush();
+
+    expect(client.calls).toContain("respond:failed");
+    expect(client.calls).not.toContain("respond:complete");
+
+    controller.abort();
+    await done;
+  });
+
+  it("does not double-process a handoff that is already in flight", async () => {
+    const client = makeClient();
+    let resolveStream: () => void = () => {};
+    const responder: AgentResponder = {
+      async *stream() {
+        await new Promise<void>((r) => (resolveStream = r));
+        yield "done";
+      },
+    };
+    const { controller, deps } = baseDeps(client, responder);
+    const scheduler = deps.scheduler as FakeScheduler;
+
+    const done = runConnector(deps);
+    await flush();
+
+    client.nextHandoff();
+    await flush();
+    // Fire the signal and the poll again while still streaming.
+    client.nextHandoff();
+    scheduler.tick(5000);
+    await flush();
+
+    resolveStream();
+    await flush();
+
+    expect(client.calls.filter((c) => c === "fetch")).toHaveLength(1);
+    expect(client.calls.filter((c) => c === "respond:complete")).toHaveLength(1);
+
+    controller.abort();
+    await done;
+  });
+
+  it("polls for handoffs as a fallback when no signal arrives", async () => {
+    const client = makeClient();
+    const { controller, deps } = baseDeps(client, chunkedResponder(["x"]));
+    const scheduler = deps.scheduler as FakeScheduler;
+
+    const done = runConnector(deps);
+    await flush();
+
+    // No realtime signal — the poll discovers the handoff.
+    scheduler.tick(5000);
+    await flush();
+
+    expect(client.calls).toContain("fetch");
+    expect(client.calls).toContain("respond:complete");
+
+    controller.abort();
+    await done;
+  });
+
+  it("logs but keeps running when a transient fetch error occurs", async () => {
+    const messages: string[] = [];
+    const client = makeClient({
+      async fetchHandoff() {
+        throw new Error("transient");
+      },
+    });
+    const { controller, deps } = baseDeps(client, chunkedResponder(["x"]));
+    deps.log = (m) => messages.push(m);
+    const scheduler = deps.scheduler as FakeScheduler;
+
+    const done = runConnector(deps);
+    await flush();
+
+    scheduler.tick(5000);
+    await flush();
+
+    expect(messages.some((m) => m.includes("transient"))).toBe(true);
+
+    controller.abort();
+    await done;
+  });
+});

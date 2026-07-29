@@ -1,0 +1,9 @@
+{
+  "sloppyImports": true,
+  "nodeModulesDir": "auto",
+  "compilerOptions": {
+    "strict": true,
+    "lib": ["deno.window", "deno.ns", "es2022"]
+  },
+  "imports": {}
+}
