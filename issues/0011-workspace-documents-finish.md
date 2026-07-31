@@ -1,7 +1,7 @@
 ---
 id: 0011
 title: Workspace Documents Finish
-status: open
+status: closed
 label: wayfinder:prototype
 parent: 0001
 blocked_by: []
@@ -40,4 +40,9 @@ read-only-for-participants surface:
 
 ## Resolution
 
-<!-- Filled on completion. -->
+Done (commit `9af8aee`). Cleanup now reclaims `documents` + `documentVersions`
+(bounded reads per doc). A bounded documents summary is folded into the single
+reactive `rooms.state` query. The web room view surfaces the agent's documents
+read-only in the center "shared plan" pane, falling back to Pi's latest message
+when no documents exist. Participants are read-only in the UI; backend
+enforcement of agent-only writes is deferred to issue 0012.
