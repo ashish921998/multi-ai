@@ -1,7 +1,7 @@
 ---
 id: 0013
 title: Agent Writes the Plan Document
-status: open
+status: closed
 label: wayfinder:prototype
 parent: 0001
 blocked_by: [0012]
@@ -33,4 +33,9 @@ completed handoff, so a room's plan accumulates instead of scrolling away.
 
 ## Resolution
 
-<!-- Filled on completion. -->
+Done (commit `eea5c43`). After a completed handoff the connector upserts the
+agent's full streamed response into `plan.md` (create on first write, OCC
+update with one retry on later writes), authorized by the agent connection id.
+The response still streams into the chat timeline; the document write is a
+best-effort side effect whose failure is logged but never fails the handoff.
+Two connector tests cover the write path and the failure-isolated path.
