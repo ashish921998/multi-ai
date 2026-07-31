@@ -18,10 +18,12 @@ class FakeScheduler {
 
 function makeClient(overrides: Partial<RoomAgentClient> = {}): RoomAgentClient & {
   calls: string[];
+  writes: Array<{ path: string; body: string }>;
   handoffListeners: Array<() => void>;
   nextHandoff: () => void;
 } {
   const calls: string[] = [];
+  const writes: Array<{ path: string; body: string }> = [];
   const handoffListeners: Array<() => void> = [];
   let pendingHandoff = {
     pending: true,
@@ -54,6 +56,10 @@ function makeClient(overrides: Partial<RoomAgentClient> = {}): RoomAgentClient &
     async disconnect() {
       calls.push("disconnect");
     },
+    async writeDocument(_id, _roomId, path, body) {
+      writes.push({ path, body });
+      return 1;
+    },
     onHandoffSignal(handler) {
       handoffListeners.push(handler);
       return () => {};
@@ -62,6 +68,7 @@ function makeClient(overrides: Partial<RoomAgentClient> = {}): RoomAgentClient &
   };
   return Object.assign(base, {
     calls,
+    writes,
     handoffListeners,
     nextHandoff: () => handoffListeners.forEach((h) => h()),
   });
@@ -131,6 +138,46 @@ describe("runConnector", () => {
     expect(client.calls).toContain("fetch");
     expect(client.calls.filter((c) => c === "respond:chunk")).toHaveLength(2);
     expect(client.calls).toContain("respond:complete");
+
+    controller.abort();
+    await done;
+  });
+
+  it("writes the plan document after a completed handoff (issue 0013)", async () => {
+    const client = makeClient();
+    const { controller, deps } = baseDeps(client, chunkedResponder(["Hello ", "world"]));
+
+    const done = runConnector(deps);
+    await flush();
+
+    client.nextHandoff();
+    await flush();
+
+    expect(client.writes).toEqual([{ path: "plan.md", body: "Hello world" }]);
+
+    controller.abort();
+    await done;
+  });
+
+  it("does not fail the handoff when the plan document write fails (issue 0013)", async () => {
+    const messages: string[] = [];
+    const client = makeClient({
+      async writeDocument() {
+        throw new Error("doc write unavailable");
+      },
+    });
+    const { controller, deps } = baseDeps(client, chunkedResponder(["plan text"]));
+    deps.log = (m) => messages.push(m);
+
+    const done = runConnector(deps);
+    await flush();
+
+    client.nextHandoff();
+    await flush();
+
+    // The handoff still completed; the doc-write failure was only logged.
+    expect(client.calls).toContain("respond:complete");
+    expect(messages.some((m) => m.includes("doc write unavailable"))).toBe(true);
 
     controller.abort();
     await done;

@@ -1,7 +1,7 @@
 ---
 id: 0012
 title: Agent-Only Document Writes
-status: open
+status: closed
 label: wayfinder:prototype
 parent: 0001
 blocked_by: [0011]
@@ -32,4 +32,8 @@ not depend on UI convention.
 
 ## Resolution
 
-<!-- Filled on completion. -->
+Done (commit `e78f405`). Added `resolveWriter` in `convex/lib/documents.ts`
+(delegates to `resolveActor`, then rejects non-agents). `documents.create`,
+`update`, and `restore` now route through it; `list`/`read`/`history` stay open
+to participants via `resolveActor`. The "agent writes, participants read" model
+is now enforced by the backend.

@@ -113,6 +113,75 @@ export class ConvexRoomAgentClient implements RoomAgentClient {
     });
   }
 
+  async writeDocument(
+    agentConnectionId: string,
+    roomId: string,
+    path: string,
+    body: string,
+  ): Promise<number> {
+    // Issue 0013: OCC upsert of the agent's plan document. Authorized by the
+    // agentConnectionId bearer only (resolveWriter accepts no session token).
+    // `ConvexClient.query` is untyped, so the list rows are narrowed here.
+    type DocSummary = { id: string; path: string; version: number };
+    const docs = (await this.client().query(api.documents.list, {
+      roomId,
+      agentConnectionId: asConnId(agentConnectionId),
+    })) as DocSummary[];
+    const existing = docs.find((d: DocSummary) => d.path === path);
+
+    if (!existing) {
+      const created = await this.client().mutation(api.documents.create, {
+        roomId,
+        agentConnectionId: asConnId(agentConnectionId),
+        path,
+        body,
+        summary: "Updated plan",
+      });
+      return created.version;
+    }
+
+    // Update with one OCC retry: if the version moved (another writer), re-read
+    // and retry once with the fresh version. A second mismatch re-throws so the
+    // connector logs a real failure rather than looping silently.
+    try {
+      const updated = await this.client().mutation(api.documents.update, {
+        roomId,
+        agentConnectionId: asConnId(agentConnectionId),
+        documentId: existing.id as Id<"documents">,
+        body,
+        expectedVersion: existing.version,
+        summary: "Updated plan",
+      });
+      return updated.version;
+    } catch {
+      const fresh = (await this.client().query(api.documents.list, {
+        roomId,
+        agentConnectionId: asConnId(agentConnectionId),
+      })) as DocSummary[];
+      const again = fresh.find((d: DocSummary) => d.path === path);
+      if (!again) {
+        // Document vanished between read and retry — treat as a create.
+        const created = await this.client().mutation(api.documents.create, {
+          roomId,
+          agentConnectionId: asConnId(agentConnectionId),
+          path,
+          body,
+          summary: "Updated plan",
+        });
+        return created.version;
+      }
+      const updated = await this.client().mutation(api.documents.update, {
+        roomId,
+        agentConnectionId: asConnId(agentConnectionId),
+        documentId: again.id as Id<"documents">,
+        body,
+        expectedVersion: again.version,
+        summary: "Updated plan",
+      });
+      return updated.version;
+    }
+  }
+
   onHandoffSignal(handler: () => void): () => void {
     const id = this.#agentConnectionId;
     if (!id) return () => {};

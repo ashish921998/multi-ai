@@ -20,6 +20,13 @@ export interface ConnectResult {
   heartbeatIntervalMs: number;
 }
 
+/**
+ * The canonical plan document the agent upserts after each completed handoff
+ * (issue 0013). A single accumulating artifact rather than one doc per turn —
+ * the plan evolves in place.
+ */
+export const PLAN_DOC_PATH = "plan.md";
+
 export interface PendingHandoff {
   pending: boolean;
   handoffId?: string;
@@ -51,6 +58,13 @@ export interface RoomAgentClient {
   respond(agentConnectionId: string, handoffId: string, opts: RespondOptions): Promise<void>;
   heartbeat(agentConnectionId: string): Promise<void>;
   disconnect(agentConnectionId: string): Promise<void>;
+  /**
+   * Upserts a workspace document as the active agent: creates it on first write
+   * or updates it (with optimistic-concurrency retry) on later writes. Used by
+   * the connector to persist the agent's plan after each handoff (issue 0013).
+   * Returns the new version number.
+   */
+  writeDocument(agentConnectionId: string, roomId: string, path: string, body: string): Promise<number>;
   /** Subscribes to a realtime handoff signal; returns an unsubscribe. */
   onHandoffSignal(handler: () => void): () => void;
 }
@@ -105,8 +119,10 @@ export async function runConnector(deps: ConnectorDeps): Promise<void> {
 
       try {
         let produced = false;
+        const chunks: string[] = [];
         for await (const chunk of responder.stream(handoff, stopSignal)) {
           produced = true;
+          chunks.push(chunk);
           await client.respond(agentConnectionId, handoff.handoffId, { chunk });
         }
         if (!produced) {
@@ -116,6 +132,17 @@ export async function runConnector(deps: ConnectorDeps): Promise<void> {
           await client.respond(agentConnectionId, handoff.handoffId, { complete: true });
         }
         log(`Completed handoff ${handoff.handoffId}.`);
+
+        // Persist the agent's full response as the durable plan document
+        // (issue 0013). This is a best-effort side effect: a failure is logged
+        // but never fails the handoff, which already completed above.
+        if (produced) {
+          try {
+            await client.writeDocument(agentConnectionId, result.roomId, PLAN_DOC_PATH, chunks.join(""));
+          } catch (err) {
+            log(`Could not write plan document: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
       } catch (err) {
         await client.respond(agentConnectionId, handoff.handoffId, { failed: true }).catch(() => {});
         log(`Handoff ${handoff.handoffId} failed: ${err instanceof Error ? err.message : String(err)}`);
