@@ -1,13 +1,22 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, type CreateRoomResponse } from "../api.ts";
-import { sessionStore } from "../session.ts";
+import { useMutation } from "convex/react";
+import { api } from "../../../../convex/api";
+
+interface CreateRoomResult {
+  roomId: string;
+  title: string;
+  password: string;
+  joinUrl: string;
+  expiresInDays: number;
+}
 
 export function Landing() {
   const navigate = useNavigate();
+  const createRoom = useMutation(api.rooms.createRoom);
   const [title, setTitle] = useState("");
   const [creating, setCreating] = useState(false);
-  const [created, setCreated] = useState<CreateRoomResponse | null>(null);
+  const [created, setCreated] = useState<CreateRoomResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [joinId, setJoinId] = useState("");
 
@@ -15,7 +24,8 @@ export function Landing() {
     setCreating(true);
     setError(null);
     try {
-      const result = await api.createRoom(title.trim() || undefined);
+      const trimmed = title.trim();
+      const result = (await createRoom(trimmed ? { title: trimmed } : {})) as CreateRoomResult;
       setCreated(result);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not create the room.");
@@ -49,10 +59,7 @@ export function Landing() {
             </div>
 
             <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
-              <button
-                className="btn"
-                onClick={() => navigate(`/r/${created.roomId}`)}
-              >
+              <button className="btn" onClick={() => navigate(`/r/${created.roomId}`)}>
                 Open room
               </button>
               <button
@@ -74,7 +81,9 @@ export function Landing() {
         ) : (
           <div className="card">
             <h1>Start a planning room</h1>
-            <p className="sub">A temporary space where a team and one local Pi agent turn a discussion into a plan.</p>
+            <p className="sub">
+              A temporary space where a team and one local Pi agent turn a discussion into a plan.
+            </p>
 
             <div className="field">
               <label>Room title (optional)</label>
@@ -111,14 +120,10 @@ export function Landing() {
                 </button>
               </div>
             </div>
-            <p className="hint">{sessionCountHint()}</p>
+            <p className="hint">No account needed. You'll set a display name when you join.</p>
           </div>
         )}
       </main>
     </div>
   );
-}
-
-function sessionCountHint(): string {
-  return "No account needed. You'll set a display name when you join.";
 }

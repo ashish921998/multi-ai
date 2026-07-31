@@ -13,12 +13,13 @@
   },
   "dependencies": {
     "@multi-ai/shared": "workspace:*",
-    "@supabase/supabase-js": "^2.45.4",
+    "convex": "^1.42.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^7.18.2"
   },
   "devDependencies": {
+    "@types/node": "^22.7.4",
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.2",

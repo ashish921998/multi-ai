@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "@multi-ai/shared": "workspace:*",
-    "@supabase/supabase-js": "^2.45.4"
+    "convex": "^1.42.3"
   },
   "devDependencies": {
     "@types/node": "^22.7.4",

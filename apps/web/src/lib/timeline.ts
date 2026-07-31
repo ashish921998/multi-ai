@@ -1,7 +1,9 @@
 /**
  * Pure helpers for the room UI that are easy to unit-test: computing the
- * dimensions a screenshot should be downscaled to before upload, and merging a
- * freshly fetched slice of messages into the local timeline on reconnect.
+ * dimensions a screenshot should be downscaled to before upload.
+ *
+ * (Timeline merging used to live here for the old fetch-on-tick reconnect path;
+ * the reactive Convex rewrite made it unnecessary, so it was removed.)
  */
 
 export interface Dimensions {
@@ -27,33 +29,4 @@ export function computeScaledDimensions(
     width: Math.max(1, Math.round(width * scale)),
     height: Math.max(1, Math.round(height * scale)),
   };
-}
-
-export interface TimelineMessage {
-  seq: number;
-  [key: string]: unknown;
-}
-
-export interface MergeResult<T extends TimelineMessage> {
-  messages: T[];
-  lastSeq: number;
-}
-
-/**
- * Merges an incoming slice of messages into the existing timeline, deduplicating
- * by sequence number and keeping the result sorted ascending. This is the
- * reconnect primitive: the browser asks for everything after its last known seq
- * and folds it into what it already has (issue 0004).
- */
-export function mergeMessages<T extends TimelineMessage>(
-  existing: readonly T[],
-  incoming: readonly T[],
-  lastSeq: number,
-): MergeResult<T> {
-  const bySeq = new Map<number, T>();
-  for (const m of existing) bySeq.set(m.seq, m);
-  for (const m of incoming) bySeq.set(m.seq, m);
-  const messages = [...bySeq.values()].sort((a, b) => a.seq - b.seq);
-  const maxSeq = messages.length > 0 ? messages[messages.length - 1]!.seq : lastSeq;
-  return { messages, lastSeq: Math.max(lastSeq, maxSeq) };
 }

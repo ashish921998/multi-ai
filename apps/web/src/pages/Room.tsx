@@ -1,10 +1,21 @@
 import { useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { api } from "../api.ts";
+import { useMutation } from "convex/react";
+import { api } from "../../../../convex/api";
+import type { RoomState } from "../../../../convex/rooms";
 import { sessionStore, type RoomSession } from "../session.ts";
 import { useRoom } from "../useRoom.ts";
 import { ScreenshotImg } from "../components/ScreenshotImg.tsx";
-import type { ConnectCodeResponse, RoomStateMessage, RoomStateResponse } from "../api.ts";
+
+type RoomMessage = RoomState["messages"][number];
+type RoomParticipant = RoomState["participants"][number];
+
+interface ConnectCodeResult {
+  connectionId: string;
+  roomId: string;
+  connectionCode: string;
+  command: string;
+}
 
 export function Room() {
   const params = useParams();
@@ -22,6 +33,7 @@ export function Room() {
 // ---------------------------------------------------------------------------
 
 function JoinGate(props: { roomId: string; onJoined: (s: RoomSession) => void }) {
+  const joinRoom = useMutation(api.rooms.joinRoom);
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -31,7 +43,11 @@ function JoinGate(props: { roomId: string; onJoined: (s: RoomSession) => void })
     setBusy(true);
     setError(null);
     try {
-      const r = await api.joinRoom(props.roomId, password, displayName.trim());
+      const r = await joinRoom({
+        roomId: props.roomId,
+        password,
+        displayName: displayName.trim(),
+      });
       const session: RoomSession = {
         roomId: r.roomId,
         participantId: r.participantId,
@@ -106,33 +122,15 @@ function RoomView(props: {
   session: RoomSession;
   onSessionLost: () => void;
 }) {
-  const { state, sendToAgent, requestConnectCode, post, upload, signedUrlFor, online } = useRoom(
+  const { state, banner, sendToAgent, requestConnectCode, post, upload } = useRoom(
     props.session,
     props.roomId,
   );
-  const [connectModal, setConnectModal] = useState<ConnectCodeResponse | null>(null);
+  const [connectModal, setConnectModal] = useState<ConnectCodeResult | null>(null);
 
-  const data = state.data;
-  const nameMap = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const p of data?.participants ?? []) m.set(p.id, p.displayName);
-    return m;
-  }, [data?.participants]);
-  const handoffInProgress =
-    state.data?.handoffStatus === "pending" ||
-    state.data?.handoffStatus === "delivered" ||
-    state.data?.handoffStatus === "responding";
-
-  const latestAgentPlan = useMemo(() => {
-    const msgs = data?.messages ?? [];
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      const m = msgs[i]!;
-      if (m.authorKind === "agent" && m.text.trim()) return m;
-    }
-    return null;
-  }, [data?.messages]);
-
-  if (state.loading && !data) {
+  // `undefined` = still loading; `null` = invalid/expired session → rejoin.
+  const data = state ?? null;
+  if (data === null && state === undefined) {
     return (
       <div className="app">
         <TopBar roomId={props.roomId} title="" />
@@ -142,14 +140,15 @@ function RoomView(props: {
       </div>
     );
   }
-  if (state.error && !data) {
+  if (data === null) {
+    sessionStore.clear(props.roomId);
     return (
       <div className="app">
         <TopBar roomId={props.roomId} title="" />
         <main className="center-screen">
           <div className="card">
             <h1>Couldn't open the room</h1>
-            <p className="sub">{state.error}</p>
+            <p className="sub">Your session is invalid or the room has expired. Rejoin to continue.</p>
             <button className="btn" onClick={props.onSessionLost}>
               Back to join
             </button>
@@ -159,22 +158,44 @@ function RoomView(props: {
     );
   }
 
+  const nameMap = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of data.participants) m.set(p.id, p.displayName);
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.participants]);
+
+  const handoffInProgress = data.handoffInProgress;
+
+  const latestAgentPlan = useMemo(() => {
+    const msgs = data.messages;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i]!;
+      if (m.authorKind === "agent" && m.text.trim()) return m;
+    }
+    return null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.messages]);
+
   return (
     <div className="app">
-      <TopBar roomId={props.roomId} title={data?.room.title ?? ""} />
+      <TopBar roomId={props.roomId} title={data.room.title} />
       <div className="room-layout">
         {/* LEFT: room context, participants, agent */}
         <aside className="pane left">
           <span className="kicker">ROOM CONTEXT</span>
-          <h2>{data?.room.title ?? "Planning room"}</h2>
+          <h2>{data.room.title}</h2>
           <div className="divider" />
-          <span className="kicker muted">PARTICIPANTS · {data?.participants.length ?? 0}</span>
+          <span className="kicker muted">PARTICIPANTS · {data.participants.length}</span>
           <div>
-            {(data?.participants ?? []).map((p) => (
-              <div key={p.id} className={"participant" + (online.current.has(p.id) ? " online" : "")}>
+            {data.participants.map((p: RoomParticipant) => (
+              <div key={p.id} className="participant online">
                 <span className="avatar">{initials(p.displayName)}</span>
                 <div>
-                  <div className="name">{p.displayName}{p.isSelf ? " (you)" : ""}</div>
+                  <div className="name">
+                    {p.displayName}
+                    {p.isSelf ? " (you)" : ""}
+                  </div>
                 </div>
               </div>
             ))}
@@ -184,9 +205,9 @@ function RoomView(props: {
           <div className="agent-card">
             <div className="agent-icon">π</div>
             <div>
-              <div className="title">{data?.agent.active ? "Pi connected" : "No Pi connected"}</div>
-              <div className={"status" + (data?.agent.active ? "" : " idle")}>
-                {data?.agent.active
+              <div className="title">{data.agent.active ? "Pi connected" : "No Pi connected"}</div>
+              <div className={"status" + (data.agent.active ? "" : " idle")}>
+                {data.agent.active
                   ? handoffInProgress
                     ? "responding…"
                     : "active and ready"
@@ -200,7 +221,7 @@ function RoomView(props: {
             onClick={async () => {
               try {
                 const c = await requestConnectCode();
-                if (c) setConnectModal(c);
+                if (c) setConnectModal(c as ConnectCodeResult);
               } catch (e) {
                 alert(e instanceof Error ? e.message : "Could not issue a code.");
               }
@@ -213,16 +234,23 @@ function RoomView(props: {
         {/* CENTER: read-only shared plan (latest agent response) */}
         <section className="pane">
           <span className="kicker muted">SHARED PLAN · READ ONLY</span>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: 14,
+            }}
+          >
             <span className="hint">{latestAgentPlan ? "Pi's latest direction" : "No plan yet"}</span>
             <button className="btn" disabled={handoffInProgress} onClick={sendToAgent}>
               {handoffInProgress ? "Waiting for Pi…" : "Send to agent ↗"}
             </button>
           </div>
-          {state.banner && <div className={"banner " + state.banner.kind}>{state.banner.text}</div>}
+          {banner && <div className={"banner " + banner.kind}>{banner.text}</div>}
           <div className="plan">
             <div className="plan-head">
-              <h3>{data?.room.title ?? "Planning room"}</h3>
+              <h3>{data.room.title}</h3>
             </div>
             <div className={"plan-body" + (latestAgentPlan ? "" : " empty")}>
               {latestAgentPlan ? (
@@ -238,13 +266,20 @@ function RoomView(props: {
 
         {/* RIGHT: discussion + composer */}
         <aside className="pane discussion">
-          <span className="kicker muted">DISCUSSION · {data?.messages.length ?? 0}</span>
+          <span className="kicker muted">DISCUSSION · {data.messages.length}</span>
           {visionWarning(data) && <div className="banner warn">{visionWarning(data)}</div>}
           <div className="messages">
-            {(data?.messages ?? []).map((m) => (
-              <Message key={m.id} m={m} me={props.session.participantId} nameMap={nameMap} signedUrlFor={signedUrlFor} />
+            {data.messages.map((m: RoomMessage) => (
+              <Message
+                key={m.id}
+                m={m}
+                me={props.session.participantId}
+                nameMap={nameMap}
+                roomId={props.roomId}
+                sessionToken={props.session.sessionToken}
+              />
             ))}
-            {(data?.messages.length ?? 0) === 0 && (
+            {data.messages.length === 0 && (
               <p className="empty">No messages yet. Start the discussion below.</p>
             )}
           </div>
@@ -280,10 +315,11 @@ function TopBar(props: { roomId: string; title: string }) {
 }
 
 function Message(props: {
-  m: RoomStateMessage;
+  m: RoomMessage;
   me: string;
   nameMap: Map<string, string>;
-  signedUrlFor: (id: string) => Promise<string | null>;
+  roomId: string;
+  sessionToken: string;
 }) {
   const isAgent = props.m.authorKind === "agent";
   const name = isAgent ? "Pi" : authorName(props.m, props.me, props.nameMap);
@@ -301,7 +337,12 @@ function Message(props: {
         {props.m.screenshots.length > 0 && (
           <div className="shots">
             {props.m.screenshots.map((s) => (
-              <ScreenshotImg key={s.id} screenshotId={s.id} mime={s.mime} signedUrlFor={props.signedUrlFor} />
+              <ScreenshotImg
+                key={s.id}
+                roomId={props.roomId}
+                sessionToken={props.sessionToken}
+                screenshotId={s.id}
+              />
             ))}
           </div>
         )}
@@ -328,7 +369,10 @@ function Composer(props: {
         const resized = await resizeImage(file);
         const uploaded = await props.upload(resized.blob, resized.width, resized.height);
         if (uploaded) {
-          setPending((p) => [...p, { id: uploaded.id, url: URL.createObjectURL(resized.blob), blob: resized.blob }]);
+          setPending((p) => [
+            ...p,
+            { id: uploaded.id, url: URL.createObjectURL(resized.blob), blob: resized.blob },
+          ]);
         }
       } catch (e) {
         alert(e instanceof Error ? e.message : "Could not attach the screenshot.");
@@ -374,7 +418,9 @@ function Composer(props: {
       />
       <div className="composer-foot">
         <div className="composer-tools">
-          <button className="icon-btn" title="Attach screenshot" onClick={() => fileRef.current?.click()}>＋</button>
+          <button className="icon-btn" title="Attach screenshot" onClick={() => fileRef.current?.click()}>
+            ＋
+          </button>
           <input
             ref={fileRef}
             type="file"
@@ -396,7 +442,7 @@ function Composer(props: {
   );
 }
 
-function ConnectModal(props: { info: ConnectCodeResponse; onClose: () => void }) {
+function ConnectModal(props: { info: ConnectCodeResult; onClose: () => void }) {
   return (
     <div className="modal-backdrop" onClick={props.onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -427,15 +473,15 @@ function ConnectModal(props: { info: ConnectCodeResponse; onClose: () => void })
 // small helpers
 // ---------------------------------------------------------------------------
 
-function authorName(m: RoomStateMessage, me: string, nameMap: Map<string, string>): string {
+function authorName(m: RoomMessage, me: string, nameMap: Map<string, string>): string {
   if (m.authorParticipantId === me) return "You";
   if (m.authorParticipantId) return nameMap.get(m.authorParticipantId) ?? "Participant";
   return "Someone";
 }
 
 /** Returns a vision-capability warning when the active agent can't see screenshots (issue 0005). */
-function visionWarning(data: RoomStateResponse | null): string | null {
-  if (!data || !data.agent.active || data.agent.supportsVision) return null;
+function visionWarning(data: RoomState): string | null {
+  if (!data.agent.active || data.agent.supportsVision) return null;
   const hasShots = data.messages.some((m) => m.screenshots.length > 0);
   if (!hasShots) return null;
   return "The connected Pi model does not receive images, so screenshots are shared with the room but not with Pi.";

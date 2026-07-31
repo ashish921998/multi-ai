@@ -9,15 +9,24 @@
     "build": "pnpm -r --filter='./packages/*' --filter='./apps/*' build",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "pnpm -r --filter='./packages/*' --filter='./apps/*' typecheck",
-    "lint": "pnpm -r --filter='./packages/*' --filter='./apps/*' lint"
+    "typecheck": "pnpm -r --filter='./packages/*' --filter='./apps/*' typecheck && tsc -p convex/tsconfig.json --noEmit",
+    "lint": "pnpm -r --filter='./packages/*' --filter='./apps/*' lint && tsc -p convex/tsconfig.json --noEmit",
+    "convex:dev": "convex dev",
+    "convex:deploy": "convex deploy",
+    "convex:typecheck": "tsc -p convex/tsconfig.json --noEmit"
   },
   "devDependencies": {
+    "@multi-ai/shared": "workspace:*",
+    "@types/node": "^22.20.1",
+    "convex": "^1.42.3",
     "typescript": "^5.6.3",
     "vitest": "^2.1.8"
   },
   "engines": {
     "node": ">=20"
   },
-  "workspaces": ["packages/*", "apps/*"]
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ]
 }

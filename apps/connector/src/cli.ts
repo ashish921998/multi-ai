@@ -10,15 +10,14 @@
  * agent, and relays handoffs between the room and the local agent command.
  *
  * Environment:
- *   FUNCTIONS_URL        Edge Functions base URL (e.g. https://<project>.functions.supabase.co)
- *   SUPABASE_URL         Project URL (for realtime)
- *   SUPABASE_ANON_KEY    Project anon key (for realtime)
- *   ROOM_AGENT_COMMAND   Command that turns a stdin handoff into a stdout plan
- *                        (defaults to an echo responder for smoke testing)
+ *   CONVEX_URL             Convex deployment URL (e.g. https://<project>.convex.cloud)
+ *   ROOM_AGENT_COMMAND     Command that turns a stdin handoff into a stdout plan
+ *                          (defaults to an echo responder for smoke testing)
+ *   ROOM_AGENT_SUPPORTS_VISION  true if the model reads images
  */
 
 import { runConnector, type Scheduler } from "./connector.ts";
-import { HttpRoomAgentClient } from "./roomClient.ts";
+import { ConvexRoomAgentClient } from "./roomClient.ts";
 import { CommandResponder, EchoResponder } from "./responder.ts";
 
 const POLL_INTERVAL_MS = 4000;
@@ -47,7 +46,7 @@ async function main(): Promise<void> {
   const roomId = roomIdArg.toUpperCase();
   const connectionCode = codeArg;
 
-  for (const envVar of ["FUNCTIONS_URL", "SUPABASE_URL", "SUPABASE_ANON_KEY"]) {
+  for (const envVar of ["CONVEX_URL"]) {
     if (!process.env[envVar]) {
       // eslint-disable-next-line no-console
       console.error(`Missing required env var: ${envVar}`);
@@ -55,7 +54,7 @@ async function main(): Promise<void> {
     }
   }
 
-  const client = new HttpRoomAgentClient();
+  const client = new ConvexRoomAgentClient();
   const command = process.env.ROOM_AGENT_COMMAND;
   const responder = command ? new CommandResponder(command) : new EchoResponder();
 

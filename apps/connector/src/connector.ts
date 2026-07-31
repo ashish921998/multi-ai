@@ -10,7 +10,7 @@
  *   5. disconnects cleanly on stop.
  *
  * The protocol client and the agent responder are injected, so this module is
- * fully unit-testable without Supabase or a real Pi session.
+ * fully unit-testable without a Convex deployment or a real Pi session.
  */
 
 export interface ConnectResult {
@@ -43,7 +43,7 @@ export interface RespondOptions {
 
 /**
  * The room protocol surface the connector talks to. The real implementation
- * calls the Supabase Edge Functions; tests inject a fake.
+ * The real implementation is the Convex client; tests inject a fake.
  */
 export interface RoomAgentClient {
   connect(roomId: string, connectionCode: string, supportsVision: boolean): Promise<ConnectResult>;

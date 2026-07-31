@@ -1,25 +1,23 @@
-import { useEffect, useState } from "react";
+import { useQuery } from "convex/react";
+import { api } from "../../../../convex/api";
+import type { Id } from "../../../../convex/_generated/dataModel";
 
 /**
- * Lazily fetches a short-lived signed URL for a private screenshot, then renders
- * it. The signed URL is the only way to view a screenshot object (issue 0005);
- * it expires after a minute, so we re-fetch on mount rather than caching.
+ * Renders a private screenshot by resolving its viewable URL through the
+ * session-gated Convex query. The URL is the only way to view a screenshot
+ * object (issue 0005); it is re-resolved reactively.
  */
 export function ScreenshotImg(props: {
+  roomId: string;
+  sessionToken: string;
   screenshotId: string;
-  mime: string;
-  signedUrlFor: (id: string) => Promise<string | null>;
 }) {
-  const [url, setUrl] = useState<string | null>(null);
-  useEffect(() => {
-    let active = true;
-    void props.signedUrlFor(props.screenshotId).then((u) => {
-      if (active) setUrl(u);
-    });
-    return () => {
-      active = false;
-    };
-  }, [props.screenshotId, props.signedUrlFor]);
+  const result = useQuery(api.screenshots.getUrl, {
+    roomId: props.roomId,
+    sessionToken: props.sessionToken,
+    screenshotId: props.screenshotId as Id<"screenshots">,
+  });
+  const url = result?.url ?? null;
   if (!url) return <div className="shot" style={{ height: 90, background: "var(--panel-2)" }} />;
   return <img className="shot" src={url} alt="Shared screenshot" />;
 }

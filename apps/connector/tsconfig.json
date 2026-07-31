@@ -1,13 +1,13 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "rootDir": "./src",
-    "outDir": "./dist",
-    "lib": ["ES2022"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["node"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": false
   },

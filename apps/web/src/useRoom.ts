@@ -1,152 +1,104 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type RoomStateResponse, type RoomStateMessage } from "./api.ts";
-import { sessionStore, type RoomSession } from "./session.ts";
-import { subscribeRoom } from "./realtime.ts";
-import { mergeMessages } from "./lib/timeline.ts";
+import { useCallback, useState } from "react";
+import { useMutation, useQuery } from "convex/react";
+import { api } from "../../../convex/api";
+import type { RoomState } from "../../../convex/rooms";
+import type { Id } from "../../../convex/_generated/dataModel";
+import type { RoomSession } from "./session.ts";
 
 // ---------------------------------------------------------------------------
-// useRoom — owns room state, realtime subscription, and the actions.
+// useRoom — one reactive Convex subscription drives the whole room.
+//
+// This replaces the old opaque-ticker + fetch-on-tick realtime layer: a single
+// `useQuery(api.rooms.state, { roomId, sessionToken })` returns a fully
+// session-gated snapshot that updates live as participants, messages, and agent
+// status change (issue 0004). Mutations are issued through `useMutation`; the
+// reactive query picks up their results automatically.
 // ---------------------------------------------------------------------------
 
-interface RoomState {
-  loading: boolean;
-  error: string | null;
-  data: RoomStateResponse | null;
-  lastSeq: number;
-  banner: { kind: "info" | "warn" | "success"; text: string } | null;
-}
+type Banner = { kind: "info" | "warn" | "success"; text: string } | null;
 
-export function useRoom(session: RoomSession | null, roomId: string) {
-  const [state, setState] = useState<RoomState>({
-    loading: true,
-    error: null,
-    data: null,
-    lastSeq: 0,
-    banner: null,
-  });
-  const onlineRef = useRef<Set<string>>(new Set());
-
-  const refresh = useCallback(
-    async (sinceSeq: number) => {
-      if (!session) return;
-      try {
-        const slice = await api.roomState(roomId, session.sessionToken, sinceSeq);
-        setState((prev) => {
-          const merged = mergeMessages<RoomStateMessage & { [k: string]: unknown }>(
-            (prev.data?.messages ?? []) as never,
-            slice.messages as never,
-            prev.lastSeq,
-          );
-          const lastSeq = Math.max(prev.lastSeq, merged.lastSeq);
-          return {
-            ...prev,
-            loading: false,
-            error: null,
-            lastSeq,
-            data: { ...slice, messages: merged.messages as unknown as RoomStateMessage[] },
-          };
-        });
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : "Lost contact with the room.";
-        if (msg.toLowerCase().includes("session")) {
-          sessionStore.clear(roomId);
-        }
-        setState((prev) => ({ ...prev, loading: false, error: msg }));
-      }
-    },
-    [roomId, session],
+export function useRoom(session: RoomSession | null, roomId: string): {
+  state: RoomState | null | undefined;
+  banner: Banner;
+  sendToAgent: () => Promise<void>;
+  requestConnectCode: () => Promise<{ connectionId: string; roomId: string; connectionCode: string; command: string } | null>;
+  post: (text: string, screenshotIds: string[]) => Promise<void>;
+  upload: (blob: Blob, width: number, height: number) => Promise<{ id: string } | null>;
+  session: RoomSession | null;
+} {
+  const state = useQuery(
+    api.rooms.state,
+    session ? { roomId, sessionToken: session.sessionToken } : "skip",
   );
 
-  // Initial load + realtime subscription + periodic refetch fallback.
-  useEffect(() => {
-    if (!session) return;
-    void refresh(0);
-    const sub = subscribeRoom(
-      roomId,
-      { participantId: session.participantId, displayName: session.displayName },
-      {
-        onTicker: (t) => {
-          if (t.type === "message") {
-            setState((prev) => {
-              if (t.seq <= prev.lastSeq) return prev;
-              return prev;
-            });
-            void refresh(stateRef.current.lastSeq);
-          } else {
-            void refresh(stateRef.current.lastSeq);
-          }
-        },
-        onPresence: (ids) => {
-          onlineRef.current = new Set(ids);
-          setState((prev) => ({ ...prev }));
-        },
-      },
-    );
-    const interval = window.setInterval(() => void refresh(stateRef.current.lastSeq), 8000);
-    return () => {
-      sub.unsubscribe();
-      window.clearInterval(interval);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomId, session?.sessionToken]);
+  const sendHandoff = useMutation(api.handoff.send);
+  const issueCode = useMutation(api.connectCode.issue);
+  const postMessage = useMutation(api.messages.post);
+  const generateUploadUrl = useMutation(api.screenshots.generateUploadUrl);
+  const registerScreenshot = useMutation(api.screenshots.register);
 
-  const stateRef = useRef(state);
-  stateRef.current = state;
+  const [banner, setBanner] = useState<Banner>(null);
 
   const sendToAgent = useCallback(async () => {
     if (!session) return;
-    setState((prev) => ({ ...prev, banner: { kind: "info", text: "Sending the new discussion to Pi…" } }));
+    setBanner({ kind: "info", text: "Sending the new discussion to Pi…" });
     try {
-      const result = await api.sendHandoff(roomId, session.sessionToken);
-      setState((prev) => ({
-        ...prev,
-        banner: result.retry
+      const result = await sendHandoff({ roomId, sessionToken: session.sessionToken });
+      setBanner(
+        result.retry
           ? { kind: "warn", text: "Retrying the last handoff to Pi." }
           : { kind: "success", text: "Sent to Pi. The response will stream into the timeline." },
-      }));
+      );
     } catch (e) {
-      setState((prev) => ({
-        ...prev,
-        banner: { kind: "warn", text: e instanceof Error ? e.message : "Could not send to Pi." },
-      }));
+      setBanner({ kind: "warn", text: e instanceof Error ? e.message : "Could not send to Pi." });
     }
-  }, [roomId, session]);
+  }, [roomId, session, sendHandoff]);
 
   const requestConnectCode = useCallback(async () => {
     if (!session) return null;
-    return api.connectCode(roomId, session.sessionToken);
-  }, [roomId, session]);
+    return issueCode({ roomId, sessionToken: session.sessionToken });
+  }, [roomId, session, issueCode]);
 
   const post = useCallback(
     async (text: string, screenshotIds: string[]) => {
       if (!session) return;
-      await api.postMessage(roomId, session.sessionToken, text, screenshotIds);
-      await refresh(stateRef.current.lastSeq);
+      await postMessage({
+        roomId,
+        sessionToken: session.sessionToken,
+        text,
+        screenshotIds: screenshotIds as Id<"screenshots">[],
+      });
     },
-    [refresh, roomId, session],
+    [roomId, session, postMessage],
   );
 
   const upload = useCallback(
     async (blob: Blob, width: number, height: number) => {
       if (!session) return null;
-      return api.uploadScreenshot(roomId, session.sessionToken, blob, width, height);
+      const { uploadUrl } = await generateUploadUrl({
+        roomId,
+        sessionToken: session.sessionToken,
+      });
+      const postResult = await fetch(uploadUrl, {
+        method: "POST",
+        headers: { "content-type": blob.type },
+        body: blob,
+      });
+      const { storageId } = (await postResult.json()) as { storageId: string };
+      const ref = await registerScreenshot({
+        roomId,
+        sessionToken: session.sessionToken,
+        storageId: storageId as Id<"_storage">,
+        mime: blob.type,
+        width,
+        height,
+      });
+      return { id: ref.id };
     },
-    [roomId, session],
+    [roomId, session, generateUploadUrl, registerScreenshot],
   );
 
-  const signedUrlFor = useCallback(
-    async (screenshotId: string) => {
-      if (!session) return null;
-      try {
-        const r = await api.signedUrl(roomId, session.sessionToken, screenshotId);
-        return r.signedUrl;
-      } catch {
-        return null;
-      }
-    },
-    [roomId, session],
-  );
-
-  return { state, refresh, sendToAgent, requestConnectCode, post, upload, signedUrlFor, online: onlineRef };
+  return { state, banner, sendToAgent, requestConnectCode, post, upload, session };
 }
 
+export type { RoomState };

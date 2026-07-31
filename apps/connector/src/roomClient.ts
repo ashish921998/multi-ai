@@ -1,13 +1,20 @@
 /**
- * Real implementation of RoomAgentClient that talks to the Supabase Edge
- * Functions and subscribes to the agent's realtime handoff channel.
+ * Reactive Convex implementation of RoomAgentClient.
  *
- * The agentConnectionId returned by `connect` is the connector's bearer
+ * Replaces the Supabase HTTP poll loop + realtime broadcast signal (decision:
+ * reactive connector). The connector subscribes to `agent.pendingHandoff` via
+ * `ConvexClient.onUpdate`, so it is notified the instant a handoff is created —
+ * no polling. The `RoomAgentClient` interface is unchanged, so `connector.ts`
+ * and its unit tests need no edits.
+ *
+ * The `agentConnectionId` returned by `connect` is the connector's bearer
  * credential: every later call is authorized by presenting it. It is an opaque,
  * unguessable id, so the connector never needs the participant's session token.
  */
 
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { ConvexClient } from "convex/browser";
+import { api } from "../../../convex/api";
+import type { Id } from "../../../convex/_generated/dataModel";
 import type {
   ConnectResult,
   PendingHandoff,
@@ -15,70 +22,112 @@ import type {
   RoomAgentClient,
 } from "./connector.ts";
 
-const FUNCTIONS_URL = (process.env.FUNCTIONS_URL ?? "").replace(/\/$/, "");
-const SUPABASE_URL = process.env.SUPABASE_URL ?? "";
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY ?? "";
+const CONVEX_URL = process.env.CONVEX_URL ?? "";
 
-export class HttpRoomAgentClient implements RoomAgentClient {
+/** Casts a client-held id to the branded Convex id type in one named place. */
+const asConnId = (id: string): Id<"agentConnections"> => id as Id<"agentConnections">;
+
+export class ConvexRoomAgentClient implements RoomAgentClient {
+  #client: ConvexClient | null = null;
   #agentConnectionId: string | null = null;
-  #supabase: SupabaseClient | null = null;
 
-  private sb(): SupabaseClient {
-    if (!this.#supabase) {
-      this.#supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-        auth: { persistSession: false },
-      });
+  private client(): ConvexClient {
+    if (!this.#client) {
+      if (!CONVEX_URL) throw new Error("CONVEX_URL env var is not set.");
+      this.#client = new ConvexClient(CONVEX_URL);
     }
-    return this.#supabase;
+    return this.#client;
   }
 
-  async connect(roomId: string, connectionCode: string, supportsVision: boolean): Promise<ConnectResult> {
-    const r = await post<{ agentConnectionId: string; roomId: string; boundarySeq: number; heartbeatIntervalMs: number }>(
-      "agent-connect",
-      { roomId, connectionCode, supportsVision },
-    );
+  async connect(
+    roomId: string,
+    connectionCode: string,
+    supportsVision: boolean,
+  ): Promise<ConnectResult> {
+    const r = await this.client().mutation(api.agent.connect, {
+      roomId,
+      connectionCode,
+      supportsVision,
+    });
     this.#agentConnectionId = r.agentConnectionId;
-    return r;
+    return {
+      agentConnectionId: r.agentConnectionId,
+      roomId: r.roomId,
+      boundarySeq: r.boundarySeq,
+      heartbeatIntervalMs: r.heartbeatIntervalMs,
+    };
   }
 
   async fetchHandoff(agentConnectionId: string): Promise<PendingHandoff> {
-    return post<PendingHandoff>("agent-fetch-handoff", { agentConnectionId });
+    const handoff = await this.client().mutation(api.handoff.fetch, {
+      agentConnectionId: asConnId(agentConnectionId),
+    });
+    if (!handoff.pending || !handoff.handoffId) return { pending: false };
+
+    // Vision screenshots need viewable URLs; storage URLs are reader-only, so
+    // they are resolved through the `visionUrl` query (one per image, ≤10).
+    let screenshots: NonNullable<PendingHandoff["screenshots"]> = [];
+    if (handoff.hasVisionContent && handoff.supportsVision) {
+      for (const s of handoff.screenshots ?? []) {
+        const { url } = await this.client().query(api.handoff.visionUrl, {
+          agentConnectionId: asConnId(agentConnectionId),
+          screenshotId: s.id as Id<"screenshots">,
+        });
+        if (url) {
+          screenshots.push({
+            messageId: s.messageId,
+            mime: s.mime,
+            signedUrl: url,
+            width: s.width,
+            height: s.height,
+          });
+        }
+      }
+    }
+
+    const result: PendingHandoff = { pending: true, handoffId: handoff.handoffId };
+    if (handoff.body !== undefined) result.body = handoff.body;
+    if (handoff.includedSeqs !== undefined) result.includedSeqs = handoff.includedSeqs;
+    if (handoff.hasVisionContent !== undefined) result.hasVisionContent = handoff.hasVisionContent;
+    if (screenshots.length > 0) result.screenshots = screenshots;
+    return result;
   }
 
   async respond(agentConnectionId: string, handoffId: string, opts: RespondOptions): Promise<void> {
-    await post("agent-respond", { agentConnectionId, handoffId, ...opts });
+    await this.client().mutation(api.handoff.respond, {
+      agentConnectionId: asConnId(agentConnectionId),
+      handoffId: handoffId as Id<"handoffs">,
+      ...opts,
+    });
   }
 
   async heartbeat(agentConnectionId: string): Promise<void> {
-    await post("agent-heartbeat", { agentConnectionId });
+    await this.client().mutation(api.agent.heartbeat, {
+      agentConnectionId: asConnId(agentConnectionId),
+    });
   }
 
   async disconnect(agentConnectionId: string): Promise<void> {
-    await post("agent-disconnect", { agentConnectionId });
+    await this.client().mutation(api.agent.disconnect, {
+      agentConnectionId: asConnId(agentConnectionId),
+    });
   }
 
   onHandoffSignal(handler: () => void): () => void {
     const id = this.#agentConnectionId;
     if (!id) return () => {};
-    const channel = this.sb().channel(`agent:${id}`);
-    channel.on("broadcast", { event: "handoff" }, () => handler()).subscribe();
-    return () => {
-      this.sb().removeChannel(channel);
-    };
+    const unsubscribe = this.client().onUpdate(
+      api.agent.pendingHandoff,
+      { agentConnectionId: asConnId(id) },
+      (result) => {
+        if (result.pending) handler();
+      },
+    );
+    return () => unsubscribe();
   }
-}
 
-async function post<T>(name: string, body: unknown): Promise<T> {
-  if (!FUNCTIONS_URL) throw new Error("FUNCTIONS_URL env var is not set.");
-  const response = await fetch(`${FUNCTIONS_URL}/${name}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const text = await response.text();
-  const data = text ? JSON.parse(text) : {};
-  if (!response.ok) {
-    throw new Error(data?.error ?? `Request to ${name} failed (${response.status})`);
+  /** Closes the underlying WebSocket. Call on shutdown. */
+  async close(): Promise<void> {
+    await this.#client?.close();
   }
-  return data as T;
 }

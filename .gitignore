@@ -7,8 +7,12 @@ build/
 .env.local
 .env.*.local
 .firecrawl/
-.supabase/
+.convex/
+supabase/
+# Agent tooling artifacts (not project code)
+.agents/
+.claude/
+skills-lock.json
 coverage/
 .vite/
 *.tsbuildinfo
-supabase/.temp/
