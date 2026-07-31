@@ -1,14 +1,16 @@
 import { useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../../convex/api";
 import type { RoomState } from "../../../../convex/rooms";
+import type { Id } from "../../../../convex/_generated/dataModel";
 import { sessionStore, type RoomSession } from "../session.ts";
 import { useRoom } from "../useRoom.ts";
 import { ScreenshotImg } from "../components/ScreenshotImg.tsx";
 
 type RoomMessage = RoomState["messages"][number];
 type RoomParticipant = RoomState["participants"][number];
+type RoomDocument = RoomState["documents"][number];
 
 interface ConnectCodeResult {
   connectionId: string;
@@ -127,6 +129,9 @@ function RoomView(props: {
     props.roomId,
   );
   const [connectModal, setConnectModal] = useState<ConnectCodeResult | null>(null);
+  // Selected workspace document in the center pane (issue 0011). Defaults to the
+  // most recently updated doc; `null` only when the room has no documents.
+  const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
 
   // `undefined` = still loading; `null` = invalid/expired session → rejoin.
   const data = state ?? null;
@@ -176,6 +181,19 @@ function RoomView(props: {
     return null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.messages]);
+
+  // Workspace documents (issue 0011): newest-updated first for the default pick.
+  const docs = useMemo(
+    () => [...data.documents].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [data.documents],
+  );
+  const hasDocs = docs.length > 0;
+  const selectedDoc: RoomDocument | null = useMemo(() => {
+    if (!hasDocs) return null;
+    return docs.find((d) => d.id === selectedDocId) ?? docs[0]!;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docs, selectedDocId, hasDocs]);
 
   return (
     <div className="app">
@@ -231,7 +249,9 @@ function RoomView(props: {
           </button>
         </aside>
 
-        {/* CENTER: read-only shared plan (latest agent response) */}
+        {/* CENTER: shared plan. When the agent has written workspace documents
+            the pane shows the selected document (read-only); otherwise it falls
+            back to Pi's latest message, so agent-less rooms behave as before. */}
         <section className="pane">
           <span className="kicker muted">SHARED PLAN · READ ONLY</span>
           <div
@@ -242,25 +262,55 @@ function RoomView(props: {
               marginBottom: 14,
             }}
           >
-            <span className="hint">{latestAgentPlan ? "Pi's latest direction" : "No plan yet"}</span>
+            <span className="hint">
+              {hasDocs ? "Pi's workspace documents" : latestAgentPlan ? "Pi's latest direction" : "No plan yet"}
+            </span>
             <button className="btn" disabled={handoffInProgress} onClick={sendToAgent}>
               {handoffInProgress ? "Waiting for Pi…" : "Send to agent ↗"}
             </button>
           </div>
           {banner && <div className={"banner " + banner.kind}>{banner.text}</div>}
+          {hasDocs && selectedDoc && (
+            <div className="doc-switcher">
+              {docs.map((d) => (
+                <button
+                  key={d.id}
+                  className={"doc-chip" + (d.id === selectedDoc.id ? " active" : "")}
+                  onClick={() => setSelectedDocId(d.id)}
+                  title={d.path}
+                >
+                  {d.path}
+                  <span className="doc-ver">v{d.version}</span>
+                </button>
+              ))}
+            </div>
+          )}
           <div className="plan">
             <div className="plan-head">
-              <h3>{data.room.title}</h3>
-            </div>
-            <div className={"plan-body" + (latestAgentPlan ? "" : " empty")}>
-              {latestAgentPlan ? (
-                <span className={latestAgentPlan.status === "streaming" ? "streaming-cursor" : undefined}>
-                  {latestAgentPlan.text || "Pi is responding…"}
+              <h3>{hasDocs && selectedDoc ? selectedDoc.path : data.room.title}</h3>
+              {hasDocs && selectedDoc && (
+                <span className="hint" style={{ marginTop: 4, display: "block" }}>
+                  updated {clock(selectedDoc.updatedAt)} · v{selectedDoc.version}
                 </span>
-              ) : (
-                "Discuss the requirement, then choose Send to agent to ask Pi for a focused, testable plan."
               )}
             </div>
+            {hasDocs && selectedDoc ? (
+              <DocumentBody
+                roomId={props.roomId}
+                documentId={selectedDoc.id}
+                sessionToken={props.session.sessionToken}
+              />
+            ) : (
+              <div className={"plan-body" + (latestAgentPlan ? "" : " empty")}>
+                {latestAgentPlan ? (
+                  <span className={latestAgentPlan.status === "streaming" ? "streaming-cursor" : undefined}>
+                    {latestAgentPlan.text || "Pi is responding…"}
+                  </span>
+                ) : (
+                  "Discuss the requirement, then choose Send to agent to ask Pi for a focused, testable plan."
+                )}
+              </div>
+            )}
           </div>
         </section>
 
@@ -349,6 +399,27 @@ function Message(props: {
       </div>
     </article>
   );
+}
+
+/**
+ * Renders one workspace document's body, read-only (issue 0011). The body is
+ * fetched lazily via `documents.read` only for the currently selected document,
+ * so a room with many docs doesn't subscribe to every body at once.
+ */
+function DocumentBody(props: {
+  roomId: string;
+  documentId: string;
+  sessionToken: string;
+}) {
+  const doc = useQuery(api.documents.read, {
+    roomId: props.roomId,
+    documentId: props.documentId as Id<"documents">,
+    sessionToken: props.sessionToken,
+  });
+  if (doc === undefined) {
+    return <div className="plan-body empty">Loading document…</div>;
+  }
+  return <div className="plan-body">{doc.body || "(empty document)"}</div>;
 }
 
 function Composer(props: {

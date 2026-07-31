@@ -178,7 +178,7 @@ export const state = query({
 
     const now = Date.now();
 
-    const [participants, messages, holder, activeHandoff] = await Promise.all([
+    const [participants, messages, holder, activeHandoff, documents] = await Promise.all([
       ctx.db
         .query("participants")
         .withIndex("by_room", (q) => q.eq("roomId", room._id))
@@ -191,6 +191,12 @@ export const state = query({
         .take(500),
       findHolder(ctx.db, room),
       room.activeHandoffId ? ctx.db.get(room.activeHandoffId) : Promise.resolve(null),
+      // Workspace documents (issue 0011) — bounded summary, no bodies. The body
+      // of the selected document is read lazily via `documents.read` by the UI.
+      ctx.db
+        .query("documents")
+        .withIndex("by_room", (q) => q.eq("roomId", room._id))
+        .take(200),
     ]);
 
     // Group the room's screenshots by message once (room-bounded index, not a
@@ -246,6 +252,16 @@ export const state = query({
           bytes: s.bytes,
         })),
       })),
+      documents: documents
+        .map((d) => ({
+          id: d._id,
+          path: d.path,
+          format: d.format,
+          version: d.version,
+          updatedAt: new Date(d.updatedAt).toISOString(),
+          lastAuthorKind: d.lastAuthorKind,
+        }))
+        .sort((a, b) => a.path.localeCompare(b.path)),
       agent: holder
         ? {
             active: agentActive,
@@ -282,6 +298,14 @@ export interface RoomState {
     status: "streaming" | "complete";
     createdAt: string;
     screenshots: { id: string; mime: string; width: number; height: number; bytes: number }[];
+  }[];
+  documents: {
+    id: string;
+    path: string;
+    format: "markdown" | "html";
+    version: number;
+    updatedAt: string;
+    lastAuthorKind: "participant" | "agent";
   }[];
   agent: {
     active: boolean;

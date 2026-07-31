@@ -77,6 +77,26 @@ export async function deleteRoomData(ctx: MutationCtx, roomId: Id<"rooms">): Pro
     await ctx.db.delete(shot._id);
   }
 
+  // Workspace documents + their version history (issue 0011). Delete child
+  // rows before parent rows. Both reads are bounded — a room's documents and
+  // per-doc versions are each capped — so a room with a long history can't blow
+  // the mutation's transaction limit. (`documentVersions` carries no `roomId`,
+  // so each document's versions are reached via the `by_document` index.)
+  const MAX_DOCS_TO_DELETE = 200;
+  const MAX_VERSIONS_PER_DOC = 500;
+  const docs = await ctx.db
+    .query("documents")
+    .withIndex("by_room", (q) => q.eq("roomId", roomId))
+    .take(MAX_DOCS_TO_DELETE);
+  for (const doc of docs) {
+    const versions = await ctx.db
+      .query("documentVersions")
+      .withIndex("by_document", (q) => q.eq("documentId", doc._id))
+      .take(MAX_VERSIONS_PER_DOC);
+    for (const v of versions) await ctx.db.delete(v._id);
+    await ctx.db.delete(doc._id);
+  }
+
   // Rate buckets keyed by this room (join-fail throttling). Participant-keyed
   // buckets reset to zero within a minute and are left to roll over naturally.
   const buckets = await ctx.db
