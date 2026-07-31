@@ -16,3 +16,4 @@ skills-lock.json
 coverage/
 .vite/
 *.tsbuildinfo
+.gstack/
