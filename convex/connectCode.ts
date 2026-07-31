@@ -11,6 +11,7 @@ import { v } from "convex/values";
 import {
   generateConnectionCode,
   hashConnectionCode,
+  normalizeConnectionCode,
 } from "@multi-ai/shared";
 import { fail } from "./lib/errors";
 import { getParticipant } from "./lib/session";
@@ -35,8 +36,11 @@ export const issue = mutation({
     const allowed = await consumeRate(ctx.db, "connect_code", me.participantId, 5);
     if (!allowed) fail("Too many connection codes. Try again in a minute.");
 
+    // Hash the NORMALIZED form: `agent.connect` normalizes the typed code
+    // (strips dashes/whitespace) before verifying, so the stored hash must be
+    // of the same canonical form or the round-trip always fails.
     const rawCode = generateConnectionCode();
-    const connectionCodeHash = await hashConnectionCode(rawCode);
+    const connectionCodeHash = await hashConnectionCode(normalizeConnectionCode(rawCode));
     const now = Date.now();
     const connectionId = await ctx.db.insert("agentConnections", {
       roomId: room._id,
