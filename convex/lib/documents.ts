@@ -86,11 +86,10 @@ export type Actor =
   | { kind: "agent"; actorId: Id<"agentConnections"> };
 
 /**
- * Resolves who is reading the workspace. An agent proves it holds the room's
+ * Resolves who is acting on the workspace. An agent proves it holds the room's
  * active, healthy lease (`agentConnectionId`); a participant proves it with a
- * session token. Both may read documents (issue 0011: participants are
- * read-only viewers). For writes, use {@link resolveWriter}. Throws
- * `ConvexError` on any auth failure.
+ * session token. Either can read and write documents — they are equal
+ * collaborators on the artifact. Throws `ConvexError` on any auth failure.
  */
 export async function resolveActor(
   db: DatabaseReader,
@@ -120,23 +119,4 @@ export async function resolveActor(
   fail("Not authenticated. Join the room or connect an agent.");
 }
 
-/**
- * Resolves the writer of a workspace document (issue 0012). Only the room's
- * active, healthy agent may create, update, or restore documents —
- * participants are read-only by backend enforcement, not just UI convention.
- * Delegates to {@link resolveActor} for auth, then rejects non-agents.
- */
-export async function resolveWriter(
-  db: DatabaseReader,
-  room: Doc<"rooms">,
-  auth: {
-    sessionToken?: string | null;
-    agentConnectionId?: Id<"agentConnections"> | null;
-  },
-): Promise<Extract<Actor, { kind: "agent" }>> {
-  const actor = await resolveActor(db, room, auth);
-  if (actor.kind !== "agent") {
-    fail("Only the active Pi agent can write workspace documents.");
-  }
-  return actor;
-}
+

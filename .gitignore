@@ -17,3 +17,4 @@ coverage/
 .vite/
 *.tsbuildinfo
 .gstack/
+.zcode/

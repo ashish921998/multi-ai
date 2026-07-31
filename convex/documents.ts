@@ -22,7 +22,7 @@ import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { fail } from "./lib/errors";
 import { lookupRoomByCode, touchActivity } from "./lib/room";
-import { validatePath, resolveActor, resolveWriter, type Actor } from "./lib/documents";
+import { validatePath, resolveActor, type Actor } from "./lib/documents";
 
 /** 1.5 MiB — matches the Workspaces document-body limit. */
 const MAX_BODY = 1_572_864;
@@ -139,7 +139,7 @@ export const create = mutation({
 
     const room = await lookupRoomByCode(ctx.db, args.roomId.trim().toUpperCase());
     if (!room) fail("Room not found.");
-    const actor = await resolveWriter(ctx.db, room, args);
+    const actor = await resolveActor(ctx.db, room, args);
 
     const existing = await ctx.db
       .query("documents")
@@ -193,7 +193,7 @@ export const update = mutation({
 
     const room = await lookupRoomByCode(ctx.db, args.roomId.trim().toUpperCase());
     if (!room) fail("Room not found.");
-    const actor = await resolveWriter(ctx.db, room, args);
+    const actor = await resolveActor(ctx.db, room, args);
 
     const doc = await ctx.db.get(args.documentId);
     if (!doc || doc.roomId !== room._id) fail("Document not found.");
@@ -244,7 +244,7 @@ export const restore = mutation({
   handler: async (ctx, args) => {
     const room = await lookupRoomByCode(ctx.db, args.roomId.trim().toUpperCase());
     if (!room) fail("Room not found.");
-    const actor = await resolveWriter(ctx.db, room, args);
+    const actor = await resolveActor(ctx.db, room, args);
 
     const doc = await ctx.db.get(args.documentId);
     if (!doc || doc.roomId !== room._id) fail("Document not found.");
