@@ -115,6 +115,46 @@ export default defineSchema({
     .index("by_room", ["roomId"]),
 
   // -------------------------------------------------------------------------
+  // Documents — the canonical, edited-in-place artifacts ("build on").
+  //
+  // The plan is a document that accumulates, not a message that scrolls away.
+  // Both joined participants and the room's active agent read and edit these in
+  // place; every write is a new `documentVersions` row. `version` drives
+  // optimistic concurrency so concurrent edits never silently clobber.
+  // -------------------------------------------------------------------------
+  documents: defineTable({
+    roomId: v.id("rooms"),
+    /** Path within the workspace, e.g. "specs/api.md". Unique per room. */
+    path: v.string(),
+    body: v.string(),
+    format: v.union(v.literal("markdown"), v.literal("html")),
+    /** Monotonic; bumped on each update. The OCC token for edits. */
+    version: v.float64(),
+    createdAt: v.float64(),
+    updatedAt: v.float64(),
+    /** Stringified participant/agentConnection id; `lastAuthorKind` disambiguates. */
+    lastAuthorId: v.string(),
+    lastAuthorKind: v.union(v.literal("participant"), v.literal("agent")),
+  })
+    .index("by_room", ["roomId"])
+    .index("by_room_and_path", ["roomId", "path"]),
+
+  // -------------------------------------------------------------------------
+  // Document versions — one row per save point (the "build on" history).
+  // -------------------------------------------------------------------------
+  documentVersions: defineTable({
+    documentId: v.id("documents"),
+    version: v.float64(),
+    body: v.string(),
+    authorId: v.string(),
+    authorKind: v.union(v.literal("participant"), v.literal("agent")),
+    summary: v.optional(v.string()),
+    createdAt: v.float64(),
+  })
+    .index("by_document", ["documentId"])
+    .index("by_document_and_version", ["documentId", "version"]),
+
+  // -------------------------------------------------------------------------
   // Agent connections (issues 0002, 0006)
   // -------------------------------------------------------------------------
   agentConnections: defineTable({
