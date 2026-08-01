@@ -35,5 +35,12 @@ not depend on UI convention.
 Done (commit `e78f405`). Added `resolveWriter` in `convex/lib/documents.ts`
 (delegates to `resolveActor`, then rejects non-agents). `documents.create`,
 `update`, and `restore` now route through it; `list`/`read`/`history` stay open
-to participants via `resolveActor`. The "agent writes, participants read" model
-is now enforced by the backend.
+to participants via `resolveActor`. This temporarily enforced the "agent writes,
+participants read" model.
+
+## Reversal
+
+Reverted by commit `70b2ade`. The product direction is now equal collaboration:
+joined participants and the active agent both create, update, and restore
+versioned documents through `resolveActor`. Issue 0015 exposes that contract in
+the browser. This ticket remains closed as historical work, not current policy.

@@ -2,7 +2,13 @@
 
 > Research target: <https://help.plannotator.ai/workspaces> (43 docs, read in full).
 > The user stated: *"this is what I was trying to create."* This file records what
-> that product actually is, and the gap between it and what we built.
+> that product actually is, and the gap at the time of the original room build.
+>
+> **Implementation update:** the hybrid path in section 3 is now shipped. Rooms
+> have participant-and-agent editable Markdown/HTML documents, optimistic
+> concurrency, version history, compare/restore, Markdown preview, and a connector
+> that reads and safely builds on `plan.md`. Accounts, MCP/API keys, comments,
+> artifacts, permanent ownership, and multi-agent access remain outside room V1.
 
 ## 1. What Plannotator Workspaces IS
 
