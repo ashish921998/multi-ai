@@ -40,7 +40,7 @@ function authorOf(actor: Actor): { lastAuthorId: string; lastAuthorKind: "partic
 // Queries
 // ---------------------------------------------------------------------------
 
-/** Lists every document in the workspace (path order), without bodies. */
+/** Lists up to 200 workspace documents in path order, without bodies. */
 export const list = query({
   args: { roomId: v.string(), ...authArgs },
   handler: async (ctx, args) => {
@@ -51,7 +51,7 @@ export const list = query({
     const docs = await ctx.db
       .query("documents")
       .withIndex("by_room", (q) => q.eq("roomId", room._id))
-      .collect();
+      .take(200);
     return docs
       .map((d) => ({
         id: d._id,
@@ -88,7 +88,39 @@ export const read = query({
   },
 });
 
-/** Lists a document's save points, newest first (no bodies). */
+/** Returns one immutable save point, including its body. */
+export const readVersion = query({
+  args: {
+    roomId: v.string(),
+    documentId: v.id("documents"),
+    version: v.float64(),
+    ...authArgs,
+  },
+  handler: async (ctx, args) => {
+    const room = await lookupRoomByCode(ctx.db, args.roomId.trim().toUpperCase());
+    if (!room) fail("Room not found.");
+    await resolveActor(ctx.db, room, args);
+
+    const doc = await ctx.db.get(args.documentId);
+    if (!doc || doc.roomId !== room._id) fail("Document not found.");
+    const version = await ctx.db
+      .query("documentVersions")
+      .withIndex("by_document_and_version", (q) =>
+        q.eq("documentId", doc._id).eq("version", args.version),
+      )
+      .unique();
+    if (!version) fail(`Version ${args.version} not found.`);
+    return {
+      version: version.version,
+      body: version.body,
+      authorKind: version.authorKind,
+      summary: version.summary,
+      createdAt: version.createdAt,
+    };
+  },
+});
+
+/** Lists a document's 200 most recent save points, newest first (no bodies). */
 export const history = query({
   args: { roomId: v.string(), documentId: v.id("documents"), ...authArgs },
   handler: async (ctx, args) => {
@@ -102,7 +134,8 @@ export const history = query({
     const versions = await ctx.db
       .query("documentVersions")
       .withIndex("by_document_and_version", (q) => q.eq("documentId", doc._id))
-      .collect();
+      .order("desc")
+      .take(200);
     return versions
       .map((vRow) => ({
         version: vRow.version,
