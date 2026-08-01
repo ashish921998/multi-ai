@@ -35,3 +35,19 @@ Done. The harness now drives room creation, participant document creation, the
 real connector CLI and handoff, connector auto-write, a subsequent participant
 edit, history assertions, and restore. It no longer encodes the reverted
 agent-only contract.
+
+## Live verification
+
+Verified against deployment `nautical-ermine-841` after a `npx convex dev --once`
+push of the 0016/0017 backend. `npx tsx e2e-documents.mts` (run twice, exit 0
+both times) proved the full collaborative contract on the live backend and the
+real local connector:
+
+- participant creates and reads `plan.md@v1`;
+- a real handoff reads the existing plan and the connector auto-writes the
+  response as agent-authored v2 (preserving the original objective);
+- the OCC guard rejects a stale participant write
+  (`Document changed since you last read it (yours v1, now v2)`);
+- the participant builds on Pi's v2 → v3;
+- history records `v3(participant) → v2(agent) → v1(participant)` newest-first;
+- restoring v1 creates v4 without rewriting the version trail.
