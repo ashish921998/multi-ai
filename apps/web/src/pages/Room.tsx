@@ -12,6 +12,7 @@ import { sessionStore, type RoomSession } from "../session.ts";
 import { useRoom } from "../useRoom.ts";
 import { DocumentWorkspace } from "../components/DocumentWorkspace.tsx";
 import { ScreenshotImg } from "../components/ScreenshotImg.tsx";
+import { buildConnectorCommand } from "../lib/connectorCommand.ts";
 
 type RoomMessage = RoomState["messages"][number];
 type RoomParticipant = RoomState["participants"][number];
@@ -426,9 +427,23 @@ function Composer(props: {
   );
 }
 
+type HarnessChoice = HarnessName | "custom";
+
 function ConnectModal(props: { info: ConnectCodeResult; onClose: () => void }) {
-  const [harness, setHarness] = useState<HarnessName>("codex");
-  const command = `${props.info.command} --agent ${harness}`;
+  const [harness, setHarness] = useState<HarnessChoice>("codex");
+  const [customExecutable, setCustomExecutable] = useState("");
+  const [customArgs, setCustomArgs] = useState("");
+  const command = buildConnectorCommand(
+    props.info.command,
+    harness === "custom"
+      ? {
+          kind: "custom",
+          executable: customExecutable,
+          args: customArgs.split(/\r?\n/).filter((arg) => arg.length > 0),
+        }
+      : { kind: "builtIn", name: harness },
+  );
+  const displayedCommand = command ?? `${props.info.command} --agent custom --command <executable>`;
 
   return (
     <div className="modal-backdrop" onClick={props.onClose}>
@@ -445,20 +460,50 @@ function ConnectModal(props: { info: ConnectCodeResult; onClose: () => void }) {
             className="input"
             value={harness}
             onChange={(event) => {
-              if (isHarnessName(event.target.value)) setHarness(event.target.value);
+              const selection = event.target.value;
+              if (selection === "custom" || isHarnessName(selection)) setHarness(selection);
             }}
           >
             {BUILT_IN_AGENT_HARNESSES.map((agent) => (
               <option key={agent.id} value={agent.id}>{agent.label}</option>
             ))}
+            <option value="custom">Custom command</option>
           </select>
         </div>
-        <div className="code-block">{command}</div>
+        {harness === "custom" && (
+          <>
+            <div className="field">
+              <label htmlFor="custom-agent-command">Executable</label>
+              <input
+                id="custom-agent-command"
+                className="input"
+                value={customExecutable}
+                onChange={(event) => setCustomExecutable(event.target.value)}
+                placeholder="./my-agent"
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="custom-agent-args">Arguments (one per line)</label>
+              <textarea
+                id="custom-agent-args"
+                className="input"
+                value={customArgs}
+                onChange={(event) => setCustomArgs(event.target.value)}
+                placeholder={"run\n--plain"}
+                rows={3}
+              />
+            </div>
+          </>
+        )}
+        <div className="code-block">{displayedCommand}</div>
         <p className="hint">One-time code: {props.info.connectionCode}</p>
         <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
           <button type="button"
             className="btn secondary"
-            onClick={() => navigator.clipboard?.writeText(command)}
+            disabled={!command}
+            onClick={() => {
+              if (command) void navigator.clipboard?.writeText(command);
+            }}
           >
             Copy command
           </button>

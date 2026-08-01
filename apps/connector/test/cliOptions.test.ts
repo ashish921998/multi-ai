@@ -27,7 +27,7 @@ describe("parseCliCommand", () => {
           "--agent",
           "custom",
           "--command",
-          "my-agent",
+          "  my-agent  ",
           "--arg",
           "run",
           "--arg=--plain",
@@ -48,6 +48,15 @@ describe("parseCliCommand", () => {
     ).toMatchObject({
       agent: { kind: "custom", executable: "my-agent", args: ["run", "--plain"] },
     });
+  });
+
+  it("reports malformed ROOM_AGENT_ARGS as an actionable configuration error", () => {
+    expect(() =>
+      parseCliCommand(["connect", "ROOM123", "ABCD-2345"], {
+        ROOM_AGENT_COMMAND: "my-agent",
+        ROOM_AGENT_ARGS: "not-json",
+      }),
+    ).toThrow("ROOM_AGENT_ARGS must be a JSON array of strings.");
   });
 
   it("rejects custom-only options for a built-in harness", () => {

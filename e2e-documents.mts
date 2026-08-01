@@ -78,11 +78,11 @@ async function main() {
     roomId: room.roomId,
     sessionToken,
   });
-  const tsxPath = `${process.cwd()}/apps/connector/node_modules/.bin/tsx`;
+  const tsxCli = `${process.cwd()}/apps/connector/node_modules/tsx/dist/cli.mjs`;
   const child = spawn(
-    "npx",
+    process.execPath,
     [
-      tsxPath,
+      tsxCli,
       "apps/connector/src/cli.ts",
       "connect",
       room.roomId,
@@ -90,14 +90,16 @@ async function main() {
       "--agent",
       "custom",
       "--command",
-      "cat",
+      process.execPath,
+      "--arg=-e",
+      "--arg=process.stdin.pipe(process.stdout)",
     ],
     {
       env: {
         ...process.env,
         CONVEX_URL,
         ROOM_AGENT_COMMAND: "",
-        PATH: `${process.cwd()}/apps/connector/node_modules/.bin:${process.env.PATH ?? ""}`,
+        ROOM_AGENT_ARGS: "",
       },
       stdio: ["inherit", "pipe", "pipe"],
     },

@@ -177,6 +177,25 @@ describe("HarnessResponder", () => {
     await expect(read()).rejects.toThrow("ENOENT");
   });
 
+  it.skipIf(process.platform === "win32")(
+    "reports when a harness is terminated by an external signal",
+    async () => {
+      const responder = new HarnessResponder(
+        customHarness(process.execPath, ["-e", 'process.kill(process.pid, "SIGTERM")']),
+      );
+      const read = async () => {
+        for await (const _chunk of responder.stream(
+          { pending: true, handoffId: "h1", body: "hello" },
+          new AbortController().signal,
+        )) {
+          // consume the stream
+        }
+      };
+
+      await expect(read()).rejects.toThrow("terminated by signal SIGTERM");
+    },
+  );
+
   it("reports a non-zero harness exit", async () => {
     const responder = new HarnessResponder(
       customHarness(process.execPath, ["-e", "process.exit(7)"]),

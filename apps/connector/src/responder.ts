@@ -53,7 +53,10 @@ export class HarnessResponder implements AgentResponder {
   }
 }
 
-type ProcessOutcome = { exitCode: number } | { error: Error };
+type ProcessOutcome =
+  | { exitCode: number }
+  | { signal: NodeJS.Signals }
+  | { error: Error };
 
 async function* runHarness(
   harness: AgentHarness,
@@ -70,7 +73,11 @@ async function* runHarness(
   });
   const completion = new Promise<ProcessOutcome>((resolve) => {
     child.once("error", (error) => resolve({ error }));
-    child.once("close", (code) => resolve({ exitCode: code ?? 1 }));
+    child.once("close", (code, signal) => {
+      if (code !== null) resolve({ exitCode: code });
+      else if (signal) resolve({ signal });
+      else resolve({ exitCode: 1 });
+    });
   });
 
   let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
@@ -90,6 +97,9 @@ async function* runHarness(
     const outcome = await completion;
     if (signal.aborted) throw new Error(`${harness.name} was stopped.`);
     if ("error" in outcome) throw outcome.error;
+    if ("signal" in outcome) {
+      throw new Error(`${harness.name} was terminated by signal ${outcome.signal}.`);
+    }
     if (stdinError) throw stdinError;
     if (outcome.exitCode !== 0) {
       throw new Error(`${harness.name} exited with code ${outcome.exitCode}.`);

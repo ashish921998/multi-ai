@@ -69,7 +69,7 @@ export function parseCliCommand(
     }
     agent = {
       kind: "custom",
-      executable: configuredCommand,
+      executable: configuredCommand.trim(),
       args: values.arg ?? readCustomArgs(env.ROOM_AGENT_ARGS),
     };
   } else {
@@ -94,7 +94,12 @@ export function parseCliCommand(
 
 function readCustomArgs(raw: string | undefined): string[] {
   if (!raw) return [];
-  const parsed: unknown = JSON.parse(raw);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("ROOM_AGENT_ARGS must be a JSON array of strings.");
+  }
   if (!Array.isArray(parsed) || !parsed.every((value) => typeof value === "string")) {
     throw new Error("ROOM_AGENT_ARGS must be a JSON array of strings.");
   }

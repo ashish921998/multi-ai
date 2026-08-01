@@ -54,6 +54,9 @@ export function getHarness(name: string): AgentHarness {
 }
 
 export function customHarness(executable: string, args: readonly string[] = []): AgentHarness {
-  if (!executable.trim()) throw new Error("A custom harness requires --command <executable>.");
-  return { name: executable, executable, args };
+  const normalizedExecutable = executable.trim();
+  if (!normalizedExecutable) {
+    throw new Error("A custom harness requires --command <executable>.");
+  }
+  return { name: normalizedExecutable, executable: normalizedExecutable, args };
 }

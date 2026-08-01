@@ -68,9 +68,9 @@ async function main() {
 
   // 5. Spawn the REAL connector binary. Run tsx from the connector's own
   //    node_modules so the child does not depend on a global PATH entry.
-  const tsxPath = `${process.cwd()}/apps/connector/node_modules/.bin/tsx`;
-  const child = spawn("npx", [
-    tsxPath,
+  const tsxCli = `${process.cwd()}/apps/connector/node_modules/tsx/dist/cli.mjs`;
+  const child = spawn(process.execPath, [
+    tsxCli,
     "apps/connector/src/cli.ts",
     "connect",
     room.roomId,
@@ -78,12 +78,15 @@ async function main() {
     "--agent",
     "custom",
     "--command",
-    "cat",
+    process.execPath,
+    "--arg=-e",
+    "--arg=process.stdin.pipe(process.stdout)",
   ], {
     env: {
       ...process.env,
       CONVEX_URL,
-      PATH: `${process.cwd()}/apps/connector/node_modules/.bin:${process.env.PATH ?? ""}`,
+      ROOM_AGENT_COMMAND: "",
+      ROOM_AGENT_ARGS: "",
     },
     stdio: ["inherit", "pipe", "pipe"],
   });

@@ -29,12 +29,19 @@ const asConnId = (id: string): Id<"agentConnections"> => id as Id<"agentConnecti
 
 export class ConvexRoomAgentClient implements RoomAgentClient {
   #client: ConvexClient | null = null;
+  #closing: Promise<void> | null = null;
   #agentConnectionId: string | null = null;
 
+  constructor(
+    private readonly createClient: (url: string) => ConvexClient = (url) => new ConvexClient(url),
+    private readonly convexUrl = CONVEX_URL,
+  ) {}
+
   private client(): ConvexClient {
+    if (this.#closing) throw new Error("Convex client is closed.");
     if (!this.#client) {
-      if (!CONVEX_URL) throw new Error("CONVEX_URL env var is not set.");
-      this.#client = new ConvexClient(CONVEX_URL);
+      if (!this.convexUrl) throw new Error("CONVEX_URL env var is not set.");
+      this.#client = this.createClient(this.convexUrl);
     }
     return this.#client;
   }
@@ -109,14 +116,30 @@ export class ConvexRoomAgentClient implements RoomAgentClient {
   }
 
   async disconnect(agentConnectionId: string): Promise<void> {
+    let disconnectFailed = false;
+    let disconnectError: unknown;
     try {
       await this.client().mutation(api.agent.disconnect, {
         agentConnectionId: asConnId(agentConnectionId),
       });
-    } finally {
-      this.#agentConnectionId = null;
-      await this.close();
+    } catch (error) {
+      disconnectFailed = true;
+      disconnectError = error;
     }
+
+    this.#agentConnectionId = null;
+    try {
+      await this.close();
+    } catch (closeError) {
+      if (disconnectFailed) {
+        throw new AggregateError(
+          [disconnectError, closeError],
+          "Agent disconnect and Convex client close both failed.",
+        );
+      }
+      throw closeError;
+    }
+    if (disconnectFailed) throw disconnectError;
   }
 
   async writeDocument(
@@ -169,8 +192,11 @@ export class ConvexRoomAgentClient implements RoomAgentClient {
 
   /** Closes the underlying WebSocket. Call on shutdown. */
   async close(): Promise<void> {
-    const client = this.#client;
-    this.#client = null;
-    await client?.close();
+    if (!this.#closing) {
+      const client = this.#client;
+      this.#client = null;
+      this.#closing = Promise.resolve().then(() => client?.close());
+    }
+    await this.#closing;
   }
 }

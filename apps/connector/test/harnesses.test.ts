@@ -70,6 +70,13 @@ describe("custom agent harness", () => {
     });
   });
 
+  it("normalizes surrounding executable whitespace", () => {
+    expect(customHarness("  my-agent  ")).toMatchObject({
+      name: "my-agent",
+      executable: "my-agent",
+    });
+  });
+
   it("requires an executable", () => {
     expect(() => customHarness("  ")).toThrow("requires --command");
   });
