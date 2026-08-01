@@ -48,16 +48,20 @@ export class HarnessResponder implements AgentResponder {
     signal.addEventListener("abort", abort, { once: true });
     child.stdin.end(invocation.stdin);
 
-    const completion = new Promise<number>((resolve, reject) => {
-      child.once("error", reject);
-      child.once("close", (code) => resolve(code ?? 1));
+    const completion = new Promise<{ exitCode: number } | { error: Error }>((resolve) => {
+      child.once("error", (error) => resolve({ error }));
+      child.once("close", (code) => resolve({ exitCode: code ?? 1 }));
     });
 
     try {
       yield* iterateStdout(child.stdout);
-      const exitCode = await completion;
-      if (exitCode !== 0 && !signal.aborted) {
-        throw new Error(`${this.harness.name} exited with code ${exitCode}.`);
+      const outcome = await completion;
+      if (signal.aborted) {
+        throw new Error(`${this.harness.name} was stopped.`);
+      }
+      if ("error" in outcome) throw outcome.error;
+      if (outcome.exitCode !== 0) {
+        throw new Error(`${this.harness.name} exited with code ${outcome.exitCode}.`);
       }
     } finally {
       signal.removeEventListener("abort", abort);
@@ -71,9 +75,11 @@ export class HarnessResponder implements AgentResponder {
 async function* iterateStdout(stdout: NodeJS.ReadableStream): AsyncIterable<string> {
   const decoder = new TextDecoder();
   for await (const chunk of stdout as AsyncIterable<Buffer>) {
-    yield decoder.decode(chunk, { stream: true });
+    const text = decoder.decode(chunk, { stream: true });
+    if (text) yield text;
   }
-  yield decoder.decode();
+  const tail = decoder.decode();
+  if (tail) yield tail;
 }
 
 /**

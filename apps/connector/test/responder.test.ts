@@ -54,6 +54,58 @@ describe("HarnessResponder", () => {
     expect(text).toContain("image/png");
   });
 
+  it("does not invent a response chunk when the harness is silent", async () => {
+    const responder = new HarnessResponder(
+      customHarness(process.execPath, ["-e", "process.exit(0)"]),
+    );
+    const chunks: string[] = [];
+    for await (const chunk of responder.stream(
+      { pending: true, handoffId: "h1", body: "hello" },
+      new AbortController().signal,
+    )) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks).toEqual([]);
+  });
+
+  it("stops an in-flight harness instead of completing a partial response", async () => {
+    const responder = new HarnessResponder(
+      customHarness(process.execPath, [
+        "-e",
+        'process.stdout.write("started"); setInterval(() => {}, 1_000)',
+      ]),
+    );
+    const controller = new AbortController();
+    const stream = responder.stream(
+      { pending: true, handoffId: "h1", body: "hello" },
+      controller.signal,
+    )[Symbol.asyncIterator]();
+
+    await expect(stream.next()).resolves.toMatchObject({ value: "started", done: false });
+    controller.abort();
+    const finish = async () => {
+      while (!(await stream.next()).done) {
+        // consume decoder flush chunks until the process closes
+      }
+    };
+    await expect(finish()).rejects.toThrow(`${process.execPath} was stopped`);
+  });
+
+  it("reports a missing harness executable", async () => {
+    const responder = new HarnessResponder(customHarness("missing-room-agent-command"));
+    const read = async () => {
+      for await (const _chunk of responder.stream(
+        { pending: true, handoffId: "h1", body: "hello" },
+        new AbortController().signal,
+      )) {
+        // consume the stream
+      }
+    };
+
+    await expect(read()).rejects.toThrow("ENOENT");
+  });
+
   it("reports a non-zero harness exit", async () => {
     const responder = new HarnessResponder(
       customHarness(process.execPath, ["-e", "process.exit(7)"]),
