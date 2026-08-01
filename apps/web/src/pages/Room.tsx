@@ -1,16 +1,15 @@
-import { useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation } from "convex/react";
 import { api } from "../../../../convex/api";
 import type { RoomState } from "../../../../convex/rooms";
-import type { Id } from "../../../../convex/_generated/dataModel";
 import { sessionStore, type RoomSession } from "../session.ts";
 import { useRoom } from "../useRoom.ts";
+import { DocumentWorkspace } from "../components/DocumentWorkspace.tsx";
 import { ScreenshotImg } from "../components/ScreenshotImg.tsx";
 
 type RoomMessage = RoomState["messages"][number];
 type RoomParticipant = RoomState["participants"][number];
-type RoomDocument = RoomState["documents"][number];
 
 interface ConnectCodeResult {
   connectionId: string;
@@ -81,8 +80,9 @@ function JoinGate(props: { roomId: string; onJoined: (s: RoomSession) => void })
           <h1>Join the room</h1>
           <p className="sub">Enter the password and the name others will see.</p>
           <div className="field">
-            <label>Display name</label>
+            <label htmlFor="join-display-name">Display name</label>
             <input
+              id="join-display-name"
               className="input"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
@@ -91,8 +91,9 @@ function JoinGate(props: { roomId: string; onJoined: (s: RoomSession) => void })
             />
           </div>
           <div className="field">
-            <label>Room password</label>
+            <label htmlFor="join-room-password">Room password</label>
             <input
+              id="join-room-password"
               className="input"
               type="password"
               value={password}
@@ -101,7 +102,7 @@ function JoinGate(props: { roomId: string; onJoined: (s: RoomSession) => void })
             />
           </div>
           {error && <div className="error">{error}</div>}
-          <button
+          <button type="button"
             className="btn"
             style={{ width: "100%" }}
             disabled={busy || !password || !displayName.trim()}
@@ -129,9 +130,6 @@ function RoomView(props: {
     props.roomId,
   );
   const [connectModal, setConnectModal] = useState<ConnectCodeResult | null>(null);
-  // Selected workspace document in the center pane (issue 0011). Defaults to the
-  // most recently updated doc; `null` only when the room has no documents.
-  const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
 
   // `undefined` = still loading; `null` = invalid/expired session → rejoin.
   const data = state ?? null;
@@ -154,7 +152,7 @@ function RoomView(props: {
           <div className="card">
             <h1>Couldn't open the room</h1>
             <p className="sub">Your session is invalid or the room has expired. Rejoin to continue.</p>
-            <button className="btn" onClick={props.onSessionLost}>
+            <button type="button" className="btn" onClick={props.onSessionLost}>
               Back to join
             </button>
           </div>
@@ -163,37 +161,11 @@ function RoomView(props: {
     );
   }
 
-  const nameMap = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const p of data.participants) m.set(p.id, p.displayName);
-    return m;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data.participants]);
-
+  const nameMap = new Map(data.participants.map((participant) => [participant.id, participant.displayName]));
   const handoffInProgress = data.handoffInProgress;
-
-  const latestAgentPlan = useMemo(() => {
-    const msgs = data.messages;
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      const m = msgs[i]!;
-      if (m.authorKind === "agent" && m.text.trim()) return m;
-    }
-    return null;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data.messages]);
-
-  // Workspace documents (issue 0011): newest-updated first for the default pick.
-  const docs = useMemo(
-    () => [...data.documents].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [data.documents],
-  );
-  const hasDocs = docs.length > 0;
-  const selectedDoc: RoomDocument | null = useMemo(() => {
-    if (!hasDocs) return null;
-    return docs.find((d) => d.id === selectedDocId) ?? docs[0]!;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [docs, selectedDocId, hasDocs]);
+  const latestAgentPlan = [...data.messages].reverse().find(
+    (message) => message.authorKind === "agent" && Boolean(message.text.trim()),
+  ) ?? null;
 
   return (
     <div className="app">
@@ -233,7 +205,7 @@ function RoomView(props: {
               </div>
             </div>
           </div>
-          <button
+          <button type="button"
             className="btn secondary"
             style={{ width: "100%", marginTop: 14 }}
             onClick={async () => {
@@ -249,70 +221,15 @@ function RoomView(props: {
           </button>
         </aside>
 
-        {/* CENTER: shared plan. When the agent has written workspace documents
-            the pane shows the selected document (read-only); otherwise it falls
-            back to Pi's latest message, so agent-less rooms behave as before. */}
-        <section className="pane">
-          <span className="kicker muted">SHARED PLAN · READ ONLY</span>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              marginBottom: 14,
-            }}
-          >
-            <span className="hint">
-              {hasDocs ? "Pi's workspace documents" : latestAgentPlan ? "Pi's latest direction" : "No plan yet"}
-            </span>
-            <button className="btn" disabled={handoffInProgress} onClick={sendToAgent}>
-              {handoffInProgress ? "Waiting for Pi…" : "Send to agent ↗"}
-            </button>
-          </div>
-          {banner && <div className={"banner " + banner.kind}>{banner.text}</div>}
-          {hasDocs && selectedDoc && (
-            <div className="doc-switcher">
-              {docs.map((d) => (
-                <button
-                  key={d.id}
-                  className={"doc-chip" + (d.id === selectedDoc.id ? " active" : "")}
-                  onClick={() => setSelectedDocId(d.id)}
-                  title={d.path}
-                >
-                  {d.path}
-                  <span className="doc-ver">v{d.version}</span>
-                </button>
-              ))}
-            </div>
-          )}
-          <div className="plan">
-            <div className="plan-head">
-              <h3>{hasDocs && selectedDoc ? selectedDoc.path : data.room.title}</h3>
-              {hasDocs && selectedDoc && (
-                <span className="hint" style={{ marginTop: 4, display: "block" }}>
-                  updated {clock(selectedDoc.updatedAt)} · v{selectedDoc.version}
-                </span>
-              )}
-            </div>
-            {hasDocs && selectedDoc ? (
-              <DocumentBody
-                roomId={props.roomId}
-                documentId={selectedDoc.id}
-                sessionToken={props.session.sessionToken}
-              />
-            ) : (
-              <div className={"plan-body" + (latestAgentPlan ? "" : " empty")}>
-                {latestAgentPlan ? (
-                  <span className={latestAgentPlan.status === "streaming" ? "streaming-cursor" : undefined}>
-                    {latestAgentPlan.text || "Pi is responding…"}
-                  </span>
-                ) : (
-                  "Discuss the requirement, then choose Send to agent to ask Pi for a focused, testable plan."
-                )}
-              </div>
-            )}
-          </div>
-        </section>
+        <DocumentWorkspace
+          roomId={props.roomId}
+          sessionToken={props.session.sessionToken}
+          documents={data.documents}
+          latestAgentPlan={latestAgentPlan}
+          handoffInProgress={handoffInProgress}
+          banner={banner}
+          sendToAgent={sendToAgent}
+        />
 
         {/* RIGHT: discussion + composer */}
         <aside className="pane discussion">
@@ -353,7 +270,7 @@ function TopBar(props: { roomId: string; title: string }) {
         <span className="live-dot" />
         <span>live</span>
         <span className="room-code">{props.roomId}</span>
-        <button
+        <button type="button"
           className="btn secondary small"
           onClick={() => navigator.clipboard?.writeText(window.location.href)}
         >
@@ -401,54 +318,43 @@ function Message(props: {
   );
 }
 
-/**
- * Renders one workspace document's body, read-only (issue 0011). The body is
- * fetched lazily via `documents.read` only for the currently selected document,
- * so a room with many docs doesn't subscribe to every body at once.
- */
-function DocumentBody(props: {
-  roomId: string;
-  documentId: string;
-  sessionToken: string;
-}) {
-  const doc = useQuery(api.documents.read, {
-    roomId: props.roomId,
-    documentId: props.documentId as Id<"documents">,
-    sessionToken: props.sessionToken,
-  });
-  if (doc === undefined) {
-    return <div className="plan-body empty">Loading document…</div>;
-  }
-  return <div className="plan-body">{doc.body || "(empty document)"}</div>;
-}
-
 function Composer(props: {
   post: (text: string, screenshotIds: string[]) => Promise<void>;
   upload: (blob: Blob, width: number, height: number) => Promise<{ id: string } | null>;
 }) {
   const [text, setText] = useState("");
-  const [pending, setPending] = useState<{ id: string; url: string; blob: Blob }[]>([]);
+  const [pending, setPending] = useState<{ id: string; url: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   async function addFiles(files: FileList | null) {
     if (!files) return;
-    for (const file of Array.from(files)) {
-      if (!file.type.startsWith("image/")) continue;
+    const images = Array.from(files).filter((file) => file.type.startsWith("image/"));
+    const { resizeImage } = await import("../lib/images.ts");
+    const additions = await Promise.all(images.map(async (file) => {
       try {
-        const { resizeImage } = await import("../lib/images.ts");
         const resized = await resizeImage(file);
         const uploaded = await props.upload(resized.blob, resized.width, resized.height);
-        if (uploaded) {
-          setPending((p) => [
-            ...p,
-            { id: uploaded.id, url: URL.createObjectURL(resized.blob), blob: resized.blob },
-          ]);
-        }
-      } catch (e) {
-        alert(e instanceof Error ? e.message : "Could not attach the screenshot.");
+        return uploaded
+          ? { id: uploaded.id, url: URL.createObjectURL(resized.blob) }
+          : null;
+      } catch (error) {
+        alert(error instanceof Error ? error.message : "Could not attach the screenshot.");
+        return null;
       }
-    }
+    }));
+    setPending((current) => [
+      ...current,
+      ...additions.filter((addition): addition is { id: string; url: string } => addition !== null),
+    ]);
+  }
+
+  function removePending(id: string) {
+    setPending((current) => {
+      const removed = current.find((item) => item.id === id);
+      if (removed) URL.revokeObjectURL(removed.url);
+      return current.filter((item) => item.id !== id);
+    });
   }
 
   async function send() {
@@ -473,12 +379,14 @@ function Composer(props: {
           {pending.map((p) => (
             <div className="pending-shot" key={p.id}>
               <img src={p.url} alt="Pending screenshot" />
-              <button onClick={() => setPending((arr) => arr.filter((x) => x.id !== p.id))}>×</button>
+              <button type="button" aria-label="Remove screenshot" onClick={() => removePending(p.id)}>×</button>
             </div>
           ))}
         </div>
       )}
+      <label className="sr-only" htmlFor="room-message">Message</label>
       <textarea
+        id="room-message"
         className="input"
         value={text}
         onChange={(e) => setText(e.target.value)}
@@ -489,7 +397,7 @@ function Composer(props: {
       />
       <div className="composer-foot">
         <div className="composer-tools">
-          <button className="icon-btn" title="Attach screenshot" onClick={() => fileRef.current?.click()}>
+          <button type="button" className="icon-btn" title="Attach screenshot" onClick={() => fileRef.current?.click()}>
             ＋
           </button>
           <input
@@ -505,7 +413,7 @@ function Composer(props: {
           />
           <span>Screenshots welcome</span>
         </div>
-        <button className="btn" disabled={busy || (!text.trim() && pending.length === 0)} onClick={send}>
+        <button type="button" className="btn" disabled={busy || (!text.trim() && pending.length === 0)} onClick={send}>
           {busy ? "Sending…" : "Send to room"}
         </button>
       </div>
@@ -525,13 +433,13 @@ function ConnectModal(props: { info: ConnectCodeResult; onClose: () => void }) {
         <div className="code-block">{props.info.command}</div>
         <p className="hint">One-time code: {props.info.connectionCode}</p>
         <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-          <button
+          <button type="button"
             className="btn secondary"
             onClick={() => navigator.clipboard?.writeText(props.info.command)}
           >
             Copy command
           </button>
-          <button className="btn ghost" onClick={props.onClose}>
+          <button type="button" className="btn ghost" onClick={props.onClose}>
             Done
           </button>
         </div>

@@ -45,4 +45,10 @@ Done (commit `9af8aee`). Cleanup now reclaims `documents` + `documentVersions`
 reactive `rooms.state` query. The web room view surfaces the agent's documents
 read-only in the center "shared plan" pane, falling back to Pi's latest message
 when no documents exist. Participants are read-only in the UI; backend
-enforcement of agent-only writes is deferred to issue 0012.
+enforcement of agent-only writes was deferred to issue 0012.
+
+## Follow-up
+
+The agent-only direction was subsequently reverted in commit `70b2ade`: joined
+participants and the active agent are equal document collaborators. Issue 0015
+replaces this ticket's read-only browser surface with the collaborative editor.

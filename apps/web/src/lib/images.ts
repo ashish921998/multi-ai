@@ -49,7 +49,10 @@ function loadViaImage(file: File): Promise<HTMLImageElement> {
       URL.revokeObjectURL(url);
       resolve(img);
     };
-    img.onerror = () => reject(new Error("Could not decode the image."));
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Could not decode the image."));
+    };
     img.src = url;
   });
 }

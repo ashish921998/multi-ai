@@ -44,11 +44,16 @@ Browsers ──reactive query──▶ Convex cloud ◀──outbound── Pi c
   - `api.ts` — re-exports the codegen client API tree (browser-safe function
     references); `_generated/` is produced by `npx convex dev`.
 - **`apps/web`** — the browser app (Vite + React), deployed to Cloudflare Pages.
-  Landing (create) → Join gate → review-workspace room. **One reactive
-  `useQuery(api.rooms.state)` subscription drives the whole room** — no polling.
+  Landing (create) → Join gate → collaborative workspace room. Participants and
+  Pi create and edit the same versioned Markdown/HTML documents with optimistic
+  concurrency, history, compare, and restore. **One reactive
+  `useQuery(api.rooms.state)` subscription drives the room summary** — no polling;
+  the selected document body and history are loaded lazily.
 - **`apps/connector`** — the local `room` CLI. Connects with a one-time code, becomes
   the active agent, heartbeats the lease, **reactively subscribes to
   `agent.pendingHandoff`**, and streams the response back into the room timeline.
+  It gives Pi the current `plan.md` and writes only against the version Pi read,
+  so a concurrent participant edit is never silently overwritten.
 
 ```
 .
@@ -63,7 +68,7 @@ Browsers ──reactive query──▶ Convex cloud ◀──outbound── Pi c
 
 ```sh
 pnpm install
-pnpm test          # 79 tests across shared / web / connector / convex
+pnpm test          # 116 tests across shared / web / connector / convex
 pnpm typecheck     # tsc --noEmit for every workspace + the convex backend
 ```
 
@@ -97,7 +102,9 @@ pnpm --filter @multi-ai/connector dev connect ROOM1234 ABCD-2345
 ```
 
 The connector stays connected and reactive — it picks up handoffs the instant a
-participant sends them, with no polling.
+participant sends them. After each response it updates `plan.md` only if the
+version Pi read is still current; conflicts leave the participant's edit intact
+and keep the streamed response in the discussion timeline.
 
 ## Deploy
 
