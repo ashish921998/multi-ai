@@ -11,7 +11,7 @@
  * provider credentials off the participant's laptop.
  */
 
-import { spawn } from "node:child_process";
+import spawn from "cross-spawn";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -58,6 +58,8 @@ type ProcessOutcome =
   | { signal: NodeJS.Signals }
   | { error: Error };
 
+const PROCESS_EXIT_GRACE_MS = 250;
+
 async function* runHarness(
   harness: AgentHarness,
   prompt: string,
@@ -67,8 +69,13 @@ async function* runHarness(
   const child = spawn(harness.executable, harness.args, {
     stdio: ["pipe", "pipe", "inherit"],
   });
+  const { stdin, stdout } = child;
+  if (!stdin || !stdout) {
+    child.kill();
+    throw new Error(`Could not open stdio pipes for ${harness.name}.`);
+  }
   let stdinError: Error | undefined;
-  child.stdin.once("error", (error) => {
+  stdin.once("error", (error) => {
     stdinError = error;
   });
   const completion = new Promise<ProcessOutcome>((resolve) => {
@@ -81,6 +88,7 @@ async function* runHarness(
   });
 
   let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
+  let exitGraceTimer: ReturnType<typeof setTimeout> | undefined;
   const stopChild = () => {
     if (child.exitCode !== null || child.signalCode !== null) return;
     child.kill("SIGTERM");
@@ -90,24 +98,39 @@ async function* runHarness(
 
   signal.addEventListener("abort", stopChild, { once: true });
   if (signal.aborted) stopChild();
-  child.stdin.end(prompt);
+  stdin.end(prompt);
 
   try {
-    yield* iterateStdout(child.stdout);
-    const outcome = await completion;
+    yield* iterateStdout(stdout);
+    let stoppedAfterOutput = false;
+    let outcome = await Promise.race([
+      completion,
+      new Promise<null>((resolve) => {
+        exitGraceTimer = setTimeout(() => resolve(null), PROCESS_EXIT_GRACE_MS);
+        exitGraceTimer.unref();
+      }),
+    ]);
+    if (exitGraceTimer) clearTimeout(exitGraceTimer);
+    if (outcome === null) {
+      stoppedAfterOutput = true;
+      stopChild();
+      outcome = await completion;
+    }
+
     if (signal.aborted) throw new Error(`${harness.name} was stopped.`);
     if ("error" in outcome) throw outcome.error;
-    if ("signal" in outcome) {
+    if ("signal" in outcome && !stoppedAfterOutput) {
       throw new Error(`${harness.name} was terminated by signal ${outcome.signal}.`);
     }
     if (stdinError) throw stdinError;
-    if (outcome.exitCode !== 0) {
+    if ("exitCode" in outcome && outcome.exitCode !== 0) {
       throw new Error(`${harness.name} exited with code ${outcome.exitCode}.`);
     }
   } finally {
     signal.removeEventListener("abort", stopChild);
     if (child.exitCode === null && child.signalCode === null) stopChild();
     await completion;
+    if (exitGraceTimer) clearTimeout(exitGraceTimer);
     if (forceKillTimer) clearTimeout(forceKillTimer);
   }
 }

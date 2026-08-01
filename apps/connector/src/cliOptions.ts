@@ -25,7 +25,7 @@ export function usage(): string {
     "Usage: room connect <roomId> <connectionCode> --agent <name>",
     "",
     `Built-in agents: ${names}`,
-    "Custom agent:   --agent custom --command <executable> [--arg <value> ...]",
+    "Custom agent:   --agent custom --command <executable> [--arg=<value> ...]",
     "Optional:       --supports-vision",
   ].join("\n");
 }

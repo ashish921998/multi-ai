@@ -163,6 +163,25 @@ describe("HarnessResponder", () => {
     await expect(finish()).rejects.toThrow(`${process.execPath} was stopped`);
   });
 
+  it("reaps a harness that closes stdout but keeps running", async () => {
+    const responder = new HarnessResponder(
+      customHarness(process.execPath, [
+        "-e",
+        'process.stdout.write("done", () => { process.stdout.end(); setInterval(() => {}, 1_000); })',
+      ]),
+    );
+    const chunks: string[] = [];
+
+    for await (const chunk of responder.stream(
+      { pending: true, handoffId: "h1", body: "hello" },
+      new AbortController().signal,
+    )) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.join("")).toBe("done");
+  });
+
   it("reports a missing harness executable", async () => {
     const responder = new HarnessResponder(customHarness("missing-room-agent-command"));
     const read = async () => {

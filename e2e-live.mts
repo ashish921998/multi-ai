@@ -3,7 +3,7 @@
  *
  * Drives the real connector CLI binary through the full agent lifecycle:
  *   create room → join → issue connect code → spawn `room connect`
- *   → post message → send handoff → verify EchoResponder streams into timeline
+ *   → post message → send handoff → verify a custom stdin echo harness streams into timeline
  *   → SIGTERM → verify clean disconnect.
  *
  * Run: npx tsx e2e-live.mts

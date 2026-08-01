@@ -7,6 +7,7 @@ describe("buildConnectorCommand", () => {
       buildConnectorCommand("room connect ROOM123 ABCD-2345", {
         kind: "builtIn",
         name: "codex",
+        supportsVision: false,
       }),
     ).toBe("room connect ROOM123 ABCD-2345 --agent codex");
   });
@@ -17,10 +18,21 @@ describe("buildConnectorCommand", () => {
         kind: "custom",
         executable: " ./my agent ",
         args: ["run", "--plain", "two words"],
+        supportsVision: false,
       }),
     ).toBe(
       "room connect ROOM123 ABCD-2345 --agent custom --command='./my agent' --arg=run --arg=--plain --arg='two words'",
     );
+  });
+
+  it("adds screenshot support when the selected model can read images", () => {
+    expect(
+      buildConnectorCommand("room connect ROOM123 ABCD-2345", {
+        kind: "builtIn",
+        name: "claude",
+        supportsVision: true,
+      }),
+    ).toBe("room connect ROOM123 ABCD-2345 --agent claude --supports-vision");
   });
 
   it("does not build an incomplete custom command", () => {
@@ -29,6 +41,7 @@ describe("buildConnectorCommand", () => {
         kind: "custom",
         executable: "  ",
         args: [],
+        supportsVision: false,
       }),
     ).toBeNull();
   });

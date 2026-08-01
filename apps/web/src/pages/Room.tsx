@@ -433,6 +433,7 @@ function ConnectModal(props: { info: ConnectCodeResult; onClose: () => void }) {
   const [harness, setHarness] = useState<HarnessChoice>("codex");
   const [customExecutable, setCustomExecutable] = useState("");
   const [customArgs, setCustomArgs] = useState("");
+  const [supportsVision, setSupportsVision] = useState(false);
   const command = buildConnectorCommand(
     props.info.command,
     harness === "custom"
@@ -440,8 +441,9 @@ function ConnectModal(props: { info: ConnectCodeResult; onClose: () => void }) {
           kind: "custom",
           executable: customExecutable,
           args: customArgs.split(/\r?\n/).filter((arg) => arg.length > 0),
+          supportsVision,
         }
-      : { kind: "builtIn", name: harness },
+      : { kind: "builtIn", name: harness, supportsVision },
   );
   const displayedCommand = command ?? `${props.info.command} --agent custom --command <executable>`;
 
@@ -495,6 +497,18 @@ function ConnectModal(props: { info: ConnectCodeResult; onClose: () => void }) {
             </div>
           </>
         )}
+        <div className="field">
+          <label htmlFor="agent-supports-vision">Screenshot support</label>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 400 }}>
+            <input
+              id="agent-supports-vision"
+              type="checkbox"
+              checked={supportsVision}
+              onChange={(event) => setSupportsVision(event.target.checked)}
+            />
+            This agent and model can read local image files
+          </label>
+        </div>
         <div className="code-block">{displayedCommand}</div>
         <p className="hint">One-time code: {props.info.connectionCode}</p>
         <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
