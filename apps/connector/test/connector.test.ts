@@ -18,12 +18,12 @@ class FakeScheduler {
 
 function makeClient(overrides: Partial<RoomAgentClient> = {}): RoomAgentClient & {
   calls: string[];
-  writes: Array<{ path: string; body: string; expectedVersion: number | null }>;
+  writes: Array<{ path: string; body: string; base: { id: string; version: number } | null }>;
   handoffListeners: Array<() => void>;
   nextHandoff: () => void;
 } {
   const calls: string[] = [];
-  const writes: Array<{ path: string; body: string; expectedVersion: number | null }> = [];
+  const writes: Array<{ path: string; body: string; base: { id: string; version: number } | null }> = [];
   const handoffListeners: Array<() => void> = [];
   let pendingHandoff = {
     pending: true,
@@ -62,8 +62,8 @@ function makeClient(overrides: Partial<RoomAgentClient> = {}): RoomAgentClient &
     async disconnect() {
       calls.push("disconnect");
     },
-    async writeDocument(_id, _roomId, path, body, expectedVersion) {
-      writes.push({ path, body, expectedVersion });
+    async writeDocument(_id, _roomId, path, body, documentBase) {
+      writes.push({ path, body, base: documentBase });
       return 1;
     },
     onHandoffSignal(handler) {
@@ -160,7 +160,7 @@ describe("runConnector", () => {
     await flush();
 
     expect(client.writes).toEqual([
-      { path: "plan.md", body: "Hello world", expectedVersion: 4 },
+      { path: "plan.md", body: "Hello world", base: { id: "doc-1", version: 4 } },
     ]);
 
     controller.abort();

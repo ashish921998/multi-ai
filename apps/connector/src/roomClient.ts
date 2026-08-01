@@ -119,21 +119,12 @@ export class ConvexRoomAgentClient implements RoomAgentClient {
     roomId: string,
     path: string,
     body: string,
-    expectedVersion: number | null,
+    base: { id: string; version: number } | null,
   ): Promise<number> {
-    type DocSummary = { id: string; path: string; version: number };
-    const docs = (await this.client().query(api.documents.list, {
-      roomId,
-      agentConnectionId: asConnId(agentConnectionId),
-    })) as DocSummary[];
-    const existing = docs.find((doc) => doc.path === path);
-
-    if (expectedVersion === null) {
-      if (existing) {
-        throw new Error(
-          `${path} was created while Pi was responding (now v${existing.version}); Pi's response was not written.`,
-        );
-      }
+    if (!base) {
+      // `documents.create` checks the indexed room/path pair transactionally. If
+      // another collaborator created the path after Pi's snapshot, this fails
+      // rather than replacing their document.
       const created = await this.client().mutation(api.documents.create, {
         roomId,
         agentConnectionId: asConnId(agentConnectionId),
@@ -144,19 +135,15 @@ export class ConvexRoomAgentClient implements RoomAgentClient {
       return created.version;
     }
 
-    if (!existing || existing.version !== expectedVersion) {
-      const current = existing ? `v${existing.version}` : "missing";
-      throw new Error(
-        `${path} changed while Pi was responding (read v${expectedVersion}, now ${current}); Pi's response was not written.`,
-      );
-    }
-
+    // Address the exact document captured with the handoff instead of searching
+    // the bounded workspace list. The mutation verifies room ownership and the
+    // version precondition in one transaction.
     const updated = await this.client().mutation(api.documents.update, {
       roomId,
       agentConnectionId: asConnId(agentConnectionId),
-      documentId: existing.id as Id<"documents">,
+      documentId: base.id as Id<"documents">,
       body,
-      expectedVersion,
+      expectedVersion: base.version,
       summary: "Pi updated the plan",
     });
     return updated.version;

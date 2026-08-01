@@ -68,16 +68,16 @@ export interface RoomAgentClient {
   heartbeat(agentConnectionId: string): Promise<void>;
   disconnect(agentConnectionId: string): Promise<void>;
   /**
-   * Writes a workspace document only if it is still at the version Pi read.
-   * `expectedVersion=null` means Pi observed that the path did not exist. A
-   * concurrent human edit is a conflict, never an invitation to overwrite.
+   * Writes a workspace document only if it is still at the snapshot Pi read.
+   * A null snapshot means Pi observed that the path did not exist. A concurrent
+   * human edit is a conflict, never an invitation to overwrite.
    */
   writeDocument(
     agentConnectionId: string,
     roomId: string,
     path: string,
     body: string,
-    expectedVersion: number | null,
+    base: Pick<WorkspaceDocumentSnapshot, "id" | "version"> | null,
   ): Promise<number>;
   /** Subscribes to a realtime handoff signal; returns an unsubscribe. */
   onHandoffSignal(handler: () => void): () => void;
@@ -157,7 +157,12 @@ export async function runConnector(deps: ConnectorDeps): Promise<void> {
               result.roomId,
               PLAN_DOC_PATH,
               chunks.join(""),
-              handoff.workspaceDocument?.version ?? null,
+              handoff.workspaceDocument
+                ? {
+                    id: handoff.workspaceDocument.id,
+                    version: handoff.workspaceDocument.version,
+                  }
+                : null,
             );
           } catch (err) {
             log(`Could not write plan document: ${err instanceof Error ? err.message : String(err)}`);
