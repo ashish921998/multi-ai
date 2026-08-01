@@ -140,6 +140,12 @@ export const fetch = mutation({
       width: number;
       height: number;
     }>;
+    workspaceDocument?: {
+      id: string;
+      path: string;
+      body: string;
+      version: number;
+    };
   }> => {
     const conn = await ctx.db.get(args.agentConnectionId);
     if (!conn || conn.status !== "active") fail("This connection is no longer active.");
@@ -199,6 +205,14 @@ export const fetch = mutation({
       }
     }
 
+    // Snapshot the canonical plan in the same transaction that acknowledges the
+    // handoff. Pi's later write uses this version as its strict OCC base, so a
+    // participant edit during generation can never be overwritten.
+    const plan = await ctx.db
+      .query("documents")
+      .withIndex("by_room_and_path", (q) => q.eq("roomId", room._id).eq("path", "plan.md"))
+      .unique();
+
     // Acknowledge receipt: advance the room boundary and mark delivered.
     await ctx.db.patch(room._id, { handoffBoundary: handoff.nextBoundarySeq });
     await ctx.db.patch(handoff._id, { status: "delivered" });
@@ -211,6 +225,16 @@ export const fetch = mutation({
       hasVisionContent: envelope.hasVisionContent,
       supportsVision: conn.supportsVision,
       screenshots: handoffScreenshots,
+      ...(plan
+        ? {
+            workspaceDocument: {
+              id: plan._id,
+              path: plan.path,
+              body: plan.body,
+              version: plan.version,
+            },
+          }
+        : {}),
     };
   },
 });

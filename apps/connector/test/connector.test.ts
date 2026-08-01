@@ -18,12 +18,12 @@ class FakeScheduler {
 
 function makeClient(overrides: Partial<RoomAgentClient> = {}): RoomAgentClient & {
   calls: string[];
-  writes: Array<{ path: string; body: string }>;
+  writes: Array<{ path: string; body: string; expectedVersion: number | null }>;
   handoffListeners: Array<() => void>;
   nextHandoff: () => void;
 } {
   const calls: string[] = [];
-  const writes: Array<{ path: string; body: string }> = [];
+  const writes: Array<{ path: string; body: string; expectedVersion: number | null }> = [];
   const handoffListeners: Array<() => void> = [];
   let pendingHandoff = {
     pending: true,
@@ -32,6 +32,12 @@ function makeClient(overrides: Partial<RoomAgentClient> = {}): RoomAgentClient &
     includedSeqs: [3],
     hasVisionContent: false,
     screenshots: [],
+    workspaceDocument: {
+      id: "doc-1",
+      path: "plan.md",
+      body: "# Existing plan",
+      version: 4,
+    },
   };
   const base: RoomAgentClient = {
     async connect() {
@@ -56,8 +62,8 @@ function makeClient(overrides: Partial<RoomAgentClient> = {}): RoomAgentClient &
     async disconnect() {
       calls.push("disconnect");
     },
-    async writeDocument(_id, _roomId, path, body) {
-      writes.push({ path, body });
+    async writeDocument(_id, _roomId, path, body, expectedVersion) {
+      writes.push({ path, body, expectedVersion });
       return 1;
     },
     onHandoffSignal(handler) {
@@ -153,13 +159,15 @@ describe("runConnector", () => {
     client.nextHandoff();
     await flush();
 
-    expect(client.writes).toEqual([{ path: "plan.md", body: "Hello world" }]);
+    expect(client.writes).toEqual([
+      { path: "plan.md", body: "Hello world", expectedVersion: 4 },
+    ]);
 
     controller.abort();
     await done;
   });
 
-  it("does not fail the handoff when the plan document write fails (issue 0013)", async () => {
+  it("does not overwrite a concurrent document edit when the OCC write fails", async () => {
     const messages: string[] = [];
     const client = makeClient({
       async writeDocument() {

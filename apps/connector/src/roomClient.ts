@@ -90,6 +90,7 @@ export class ConvexRoomAgentClient implements RoomAgentClient {
     if (handoff.includedSeqs !== undefined) result.includedSeqs = handoff.includedSeqs;
     if (handoff.hasVisionContent !== undefined) result.hasVisionContent = handoff.hasVisionContent;
     if (screenshots.length > 0) result.screenshots = screenshots;
+    if (handoff.workspaceDocument) result.workspaceDocument = handoff.workspaceDocument;
     return result;
   }
 
@@ -118,68 +119,47 @@ export class ConvexRoomAgentClient implements RoomAgentClient {
     roomId: string,
     path: string,
     body: string,
+    expectedVersion: number | null,
   ): Promise<number> {
-    // Issue 0013: OCC upsert of the agent's plan document. Authorized by the
-    // agentConnectionId bearer only (resolveWriter accepts no session token).
-    // `ConvexClient.query` is untyped, so the list rows are narrowed here.
     type DocSummary = { id: string; path: string; version: number };
     const docs = (await this.client().query(api.documents.list, {
       roomId,
       agentConnectionId: asConnId(agentConnectionId),
     })) as DocSummary[];
-    const existing = docs.find((d: DocSummary) => d.path === path);
+    const existing = docs.find((doc) => doc.path === path);
 
-    if (!existing) {
+    if (expectedVersion === null) {
+      if (existing) {
+        throw new Error(
+          `${path} was created while Pi was responding (now v${existing.version}); Pi's response was not written.`,
+        );
+      }
       const created = await this.client().mutation(api.documents.create, {
         roomId,
         agentConnectionId: asConnId(agentConnectionId),
         path,
         body,
-        summary: "Updated plan",
+        summary: "Pi created the plan",
       });
       return created.version;
     }
 
-    // Update with one OCC retry: if the version moved (another writer), re-read
-    // and retry once with the fresh version. A second mismatch re-throws so the
-    // connector logs a real failure rather than looping silently.
-    try {
-      const updated = await this.client().mutation(api.documents.update, {
-        roomId,
-        agentConnectionId: asConnId(agentConnectionId),
-        documentId: existing.id as Id<"documents">,
-        body,
-        expectedVersion: existing.version,
-        summary: "Updated plan",
-      });
-      return updated.version;
-    } catch {
-      const fresh = (await this.client().query(api.documents.list, {
-        roomId,
-        agentConnectionId: asConnId(agentConnectionId),
-      })) as DocSummary[];
-      const again = fresh.find((d: DocSummary) => d.path === path);
-      if (!again) {
-        // Document vanished between read and retry — treat as a create.
-        const created = await this.client().mutation(api.documents.create, {
-          roomId,
-          agentConnectionId: asConnId(agentConnectionId),
-          path,
-          body,
-          summary: "Updated plan",
-        });
-        return created.version;
-      }
-      const updated = await this.client().mutation(api.documents.update, {
-        roomId,
-        agentConnectionId: asConnId(agentConnectionId),
-        documentId: again.id as Id<"documents">,
-        body,
-        expectedVersion: again.version,
-        summary: "Updated plan",
-      });
-      return updated.version;
+    if (!existing || existing.version !== expectedVersion) {
+      const current = existing ? `v${existing.version}` : "missing";
+      throw new Error(
+        `${path} changed while Pi was responding (read v${expectedVersion}, now ${current}); Pi's response was not written.`,
+      );
     }
+
+    const updated = await this.client().mutation(api.documents.update, {
+      roomId,
+      agentConnectionId: asConnId(agentConnectionId),
+      documentId: existing.id as Id<"documents">,
+      body,
+      expectedVersion,
+      summary: "Pi updated the plan",
+    });
+    return updated.version;
   }
 
   onHandoffSignal(handler: () => void): () => void {

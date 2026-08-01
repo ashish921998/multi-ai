@@ -59,6 +59,23 @@ describe("composeStdin", () => {
     expect(composeStdin("hello", { files: [] })).toBe("hello");
   });
 
+  it("includes the exact workspace version and asks for a complete updated document", () => {
+    const stdin = composeStdin("new discussion", { files: [] }, {
+      id: "doc-1",
+      path: "plan.md",
+      body: "# Existing plan\n\nKeep this.",
+      version: 7,
+    });
+    expect(stdin).toContain("Current plan.md (v7)");
+    expect(stdin).toContain("# Existing plan");
+    expect(stdin).toContain("Return ONLY the complete Markdown contents");
+  });
+
+  it("tells the agent when plan.md needs to be created", () => {
+    const stdin = composeStdin("new discussion", { files: [] }, null);
+    expect(stdin).toContain("No plan.md exists yet");
+  });
+
   it("lists each attachment path, mime, and dimensions", () => {
     const stdin = composeStdin("body", {
       files: [{ path: "/tmp/a.png", mime: "image/png", width: 2, height: 3 }],

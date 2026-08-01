@@ -19,7 +19,11 @@ import { spawn } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AgentResponder, PendingHandoff } from "./connector.ts";
+import type {
+  AgentResponder,
+  PendingHandoff,
+  WorkspaceDocumentSnapshot,
+} from "./connector.ts";
 
 interface AttachmentFile {
   /** Absolute path the agent command can open(). */
@@ -34,7 +38,11 @@ export class CommandResponder implements AgentResponder {
 
   async *stream(handoff: PendingHandoff, signal: AbortSignal): AsyncIterable<string> {
     const attachments = await materializeScreenshots(handoff.screenshots ?? [], signal);
-    const stdin = composeStdin(handoff.body ?? "", attachments);
+    const stdin = composeStdin(
+      handoff.body ?? "",
+      attachments,
+      handoff.workspaceDocument ?? null,
+    );
 
     const child = spawn(this.command, { shell: true, stdio: ["pipe", "pipe", "inherit"] });
 
@@ -100,15 +108,32 @@ export async function materializeScreenshots(
   return { dir, files };
 }
 
-/** Builds the text fed to the command's stdin: the envelope plus an attachment
- * manifest listing the downloaded image paths. */
-export function composeStdin(body: string, attachments: { files: AttachmentFile[] }): string {
-  if (!attachments.files.length) return body;
-  const lines = attachments.files.map((f) => {
-    const dims = f.width && f.height ? `, ${f.width}x${f.height}` : "";
-    return `- ${f.path} (${f.mime}${dims})`;
-  });
-  return `${body}\n\n--- Attachments (local image files, readable from disk) ---\n${lines.join("\n")}\n`;
+/**
+ * Builds the command prompt from the new discussion, the exact plan version Pi
+ * will update, and any downloaded attachments. Supplying `null` explicitly
+ * means plan.md does not exist yet; omitting the argument preserves the old
+ * envelope-only helper behavior used by callers outside the room connector.
+ */
+export function composeStdin(
+  body: string,
+  attachments: { files: AttachmentFile[] },
+  workspaceDocument?: WorkspaceDocumentSnapshot | null,
+): string {
+  let prompt = body;
+  if (workspaceDocument !== undefined) {
+    const current = workspaceDocument
+      ? `Current ${workspaceDocument.path} (v${workspaceDocument.version}):\n\n${workspaceDocument.body}`
+      : "No plan.md exists yet.";
+    prompt += `\n\n--- Shared workspace document ---\n${current}\n\nUpdate the plan using the new discussion above. Return ONLY the complete Markdown contents for plan.md, including the useful existing content you are keeping. Do not wrap the document in a code fence and do not describe the edit.`;
+  }
+  if (attachments.files.length) {
+    const lines = attachments.files.map((file) => {
+      const dims = file.width && file.height ? `, ${file.width}x${file.height}` : "";
+      return `- ${file.path} (${file.mime}${dims})`;
+    });
+    prompt += `\n\n--- Attachments (local image files, readable from disk) ---\n${lines.join("\n")}\n`;
+  }
+  return prompt;
 }
 
 function mimeToExt(mime: string): string {
@@ -128,10 +153,12 @@ function mimeToExt(mime: string): string {
   }
 }
 
-/** A responder that just echoes the envelope — handy for local smoke tests. */
+/** A responder that deterministically builds on plan.md for local smoke tests. */
 export class EchoResponder implements AgentResponder {
   async *stream(handoff: PendingHandoff): AsyncIterable<string> {
-    yield `# Echo responder\n\nI received the handoff with ${handoff.includedSeqs?.length ?? 0} new message(s).\n\n`;
-    yield "```\n" + (handoff.body ?? "") + "\n```";
+    const current = handoff.workspaceDocument?.body.trim() || "# Plan";
+    yield `${current}\n\n## Latest handoff\n\n`;
+    yield `Echo responder received ${handoff.includedSeqs?.length ?? 0} new message(s).\n\n`;
+    yield handoff.body ?? "";
   }
 }

@@ -27,6 +27,13 @@ export interface ConnectResult {
  */
 export const PLAN_DOC_PATH = "plan.md";
 
+export interface WorkspaceDocumentSnapshot {
+  id: string;
+  path: string;
+  body: string;
+  version: number;
+}
+
 export interface PendingHandoff {
   pending: boolean;
   handoffId?: string;
@@ -40,6 +47,8 @@ export interface PendingHandoff {
     width?: number;
     height?: number;
   }>;
+  /** The plan version Pi read before responding, used as the OCC write base. */
+  workspaceDocument?: WorkspaceDocumentSnapshot;
 }
 
 export interface RespondOptions {
@@ -59,12 +68,17 @@ export interface RoomAgentClient {
   heartbeat(agentConnectionId: string): Promise<void>;
   disconnect(agentConnectionId: string): Promise<void>;
   /**
-   * Upserts a workspace document as the active agent: creates it on first write
-   * or updates it (with optimistic-concurrency retry) on later writes. Used by
-   * the connector to persist the agent's plan after each handoff (issue 0013).
-   * Returns the new version number.
+   * Writes a workspace document only if it is still at the version Pi read.
+   * `expectedVersion=null` means Pi observed that the path did not exist. A
+   * concurrent human edit is a conflict, never an invitation to overwrite.
    */
-  writeDocument(agentConnectionId: string, roomId: string, path: string, body: string): Promise<number>;
+  writeDocument(
+    agentConnectionId: string,
+    roomId: string,
+    path: string,
+    body: string,
+    expectedVersion: number | null,
+  ): Promise<number>;
   /** Subscribes to a realtime handoff signal; returns an unsubscribe. */
   onHandoffSignal(handler: () => void): () => void;
 }
@@ -138,7 +152,13 @@ export async function runConnector(deps: ConnectorDeps): Promise<void> {
         // but never fails the handoff, which already completed above.
         if (produced) {
           try {
-            await client.writeDocument(agentConnectionId, result.roomId, PLAN_DOC_PATH, chunks.join(""));
+            await client.writeDocument(
+              agentConnectionId,
+              result.roomId,
+              PLAN_DOC_PATH,
+              chunks.join(""),
+              handoff.workspaceDocument?.version ?? null,
+            );
           } catch (err) {
             log(`Could not write plan document: ${err instanceof Error ? err.message : String(err)}`);
           }
