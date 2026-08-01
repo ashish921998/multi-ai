@@ -50,6 +50,25 @@ describe("parseCliCommand", () => {
     });
   });
 
+  it("does not apply environment arguments to an explicit command", () => {
+    expect(
+      parseCliCommand(
+        [
+          "connect",
+          "ROOM123",
+          "ABCD-2345",
+          "--agent",
+          "custom",
+          "--command",
+          "one-off-agent",
+        ],
+        { ROOM_AGENT_ARGS: '["for-a-different-agent"]' },
+      ),
+    ).toMatchObject({
+      agent: { kind: "custom", executable: "one-off-agent", args: [] },
+    });
+  });
+
   it("reports malformed ROOM_AGENT_ARGS as an actionable configuration error", () => {
     expect(() =>
       parseCliCommand(["connect", "ROOM123", "ABCD-2345"], {

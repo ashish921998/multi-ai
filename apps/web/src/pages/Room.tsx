@@ -483,6 +483,10 @@ function ConnectModal(props: { info: ConnectCodeResult; onClose: () => void }) {
                 onChange={(event) => setCustomExecutable(event.target.value)}
                 placeholder="./my-agent"
               />
+              <span className="hint">
+                Use a command on PATH or an absolute/relative path. Shell expansions such as ~,
+                $HOME, and globs are not applied.
+              </span>
             </div>
             <div className="field">
               <label htmlFor="custom-agent-args">Arguments (one per line)</label>

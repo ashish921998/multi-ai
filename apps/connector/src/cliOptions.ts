@@ -70,7 +70,7 @@ export function parseCliCommand(
     agent = {
       kind: "custom",
       executable: configuredCommand.trim(),
-      args: values.arg ?? readCustomArgs(env.ROOM_AGENT_ARGS),
+      args: values.arg ?? (values.command === undefined ? readCustomArgs(env.ROOM_AGENT_ARGS) : []),
     };
   } else {
     if (!isHarnessName(agentName)) {

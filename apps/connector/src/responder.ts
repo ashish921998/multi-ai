@@ -123,7 +123,7 @@ async function* runHarness(
       throw new Error(`${harness.name} was terminated by signal ${outcome.signal}.`);
     }
     if (stdinError) throw stdinError;
-    if ("exitCode" in outcome && outcome.exitCode !== 0) {
+    if ("exitCode" in outcome && outcome.exitCode !== 0 && !stoppedAfterOutput) {
       throw new Error(`${harness.name} exited with code ${outcome.exitCode}.`);
     }
   } finally {

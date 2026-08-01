@@ -167,7 +167,7 @@ describe("HarnessResponder", () => {
     const responder = new HarnessResponder(
       customHarness(process.execPath, [
         "-e",
-        'process.stdout.write("done", () => { process.stdout.end(); setInterval(() => {}, 1_000); })',
+        'process.on("SIGTERM", () => process.exit(7)); process.stdout.write("done", () => { process.stdout.end(); setInterval(() => {}, 1_000); })',
       ]),
     );
     const chunks: string[] = [];
