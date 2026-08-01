@@ -2,7 +2,7 @@ import { access, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect } from "vitest";
-import { customHarness } from "../src/harnesses.ts";
+import { customHarness, getHarness } from "../src/harnesses.ts";
 import { HarnessResponder, composePrompt } from "../src/responder.ts";
 
 // A 1×1 transparent PNG as a data URL — lets us test image download without a
@@ -26,6 +26,30 @@ describe("HarnessResponder", () => {
     expect(out.join("")).toContain("# Plan");
     expect(out.join("")).toContain("Discuss the API.");
   });
+
+  it.each(["pi", "cursor", "opencode"])(
+    "pipes the prompt to the %s harness through stdin",
+    async (name) => {
+      const harness = getHarness(name);
+      const responder = new HarnessResponder({
+        ...harness,
+        executable: process.execPath,
+        args: ["-e", "process.stdin.pipe(process.stdout)", "--", ...harness.args],
+      });
+      const chunks: string[] = [];
+
+      for await (const chunk of responder.stream(
+        { pending: true, handoffId: "h1", body: `prompt for ${name}` },
+        new AbortController().signal,
+      )) {
+        chunks.push(chunk);
+      }
+
+      expect(chunks.join("")).toBe(
+        composePrompt(`prompt for ${name}`, { files: [] }, null),
+      );
+    },
+  );
 
   it("pipes prompts larger than the process argument limit through stdin", async () => {
     const body = "x".repeat(1_100_000);

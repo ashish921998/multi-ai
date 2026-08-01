@@ -435,11 +435,11 @@ export function Landing() {
                 <p className="lp-body">
                   Nobody writes the requirements doc — the room is the requirements doc. Messages,
                   screenshots, and pushback pile up in one thread, and when it's ripe, you hand
-                  the whole thing to your agent in one click.
+                  the discussion to your agent in one click.
                 </p>
                 <p className="lp-body">
-                  Your agent reads everything—every message, every screenshot—and answers with a plan,
-                  streamed back into the room where everyone can tear it apart.
+                  Your agent reads every message—and, when it supports vision, the screenshots—and
+                  answers with a plan, streamed back into the room where everyone can tear it apart.
                 </p>
               </div>
               <div className="lp-reveal d2">
@@ -463,8 +463,8 @@ export function Landing() {
               <div className="lp-how-card lp-reveal d2">
                 <span className="lp-how-num">02</span>
                 <h3>Argue it out</h3>
-                <p>Messages, screenshots, pushback. Don't tidy it—the mess is the point, and your
-                agent reads all of it.</p>
+                <p>Messages, screenshots, pushback. Don't tidy it—the mess is the point. Your agent
+                reads every message and, with vision support, the screenshots.</p>
               </div>
               <div className="lp-how-card lp-reveal d3">
                 <span className="lp-how-num">03</span>

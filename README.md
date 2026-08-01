@@ -22,7 +22,7 @@ under **Connect an agent** and run the generated command.
 
 ## Architecture
 
-```
+```text
 Browsers ──reactive query──▶ Convex cloud ◀──outbound── agent connector (local laptop)
                                   │
                      documents · file storage · functions · cron
@@ -45,7 +45,7 @@ Browsers ──reactive query──▶ Convex cloud ◀──outbound── agen
     references); `_generated/` is produced by `npx convex dev`.
 - **`apps/web`** — the browser app (Vite + React), deployed to Cloudflare Pages.
   Landing (create) → Join gate → collaborative workspace room. Participants and
-  participants and the connected agent edit the same versioned Markdown/HTML documents with optimistic
+  the connected agent edit the same versioned Markdown/HTML documents with optimistic
   concurrency, history, compare, and restore. **One reactive
   `useQuery(api.rooms.state)` subscription drives the room summary** — no polling;
   the selected document body and history are loaded lazily.
@@ -55,7 +55,7 @@ Browsers ──reactive query──▶ Convex cloud ◀──outbound── agen
   It gives the agent the current `plan.md` and writes only against the version it read,
   so a concurrent participant edit is never silently overwritten.
 
-```
+```text
 .
 ├── packages/shared/   # runtime-agnostic contract (DO NOT depend on Convex here)
 ├── convex/            # backend: schema, functions, lib helpers, tests

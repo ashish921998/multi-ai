@@ -106,5 +106,5 @@ Good:  laptop ──outbound──▶ cloud relay ◀──outbound── browse
 Avoid: internet ──inbound tunnel──▶ laptop
 ```
 
-Only the cloud relay is publicly reachable. The local connector behaves like a
-desktop chat client maintaining an outbound connection.
+The participant's laptop is not publicly reachable. The local connector behaves
+like a desktop chat client and communicates through outbound connections.
