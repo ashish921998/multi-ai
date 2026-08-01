@@ -1,7 +1,7 @@
 /**
  * Public entrypoint for the @multi-ai/shared contract package.
  *
- * Imported by the browser app, the local Pi connector, and the Supabase Edge
+ * Imported by the browser app, the local agent connector, and the backend
  * Functions so every layer agrees on room, message, handoff, and lease shapes.
  */
 

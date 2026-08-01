@@ -3,8 +3,8 @@
  *
  * Proves against a deployed Convex backend and the real local connector:
  *   1. a participant creates and reads plan.md;
- *   2. a real handoff gives Pi the current plan and auto-writes the response;
- *   3. participants build on Pi's version with optimistic concurrency;
+ *   2. a real handoff gives the agent the current plan and auto-writes its response;
+ *   3. participants build on the agent's version with optimistic concurrency;
  *   4. history is retained and restore creates a new latest version.
  *
  * Run: npx tsx e2e-documents.mts
@@ -56,7 +56,7 @@ async function main() {
   const sessionToken = joined.sessionToken;
   log(`room ${room.roomId}, joined as ${joined.displayName}`);
 
-  // A human starts the durable artifact before Pi connects.
+  // A human starts the durable artifact before the agent connects.
   const created = await client.mutation(api.documents.create, {
     roomId: room.roomId,
     sessionToken,
@@ -81,7 +81,17 @@ async function main() {
   const tsxPath = `${process.cwd()}/apps/connector/node_modules/.bin/tsx`;
   const child = spawn(
     "npx",
-    [tsxPath, "apps/connector/src/cli.ts", "connect", room.roomId, code.connectionCode],
+    [
+      tsxPath,
+      "apps/connector/src/cli.ts",
+      "connect",
+      room.roomId,
+      code.connectionCode,
+      "--agent",
+      "custom",
+      "--command",
+      "cat",
+    ],
     {
       env: {
         ...process.env,
@@ -98,8 +108,8 @@ async function main() {
     await waitForStdout(child, "as the active agent");
     log("connector active");
 
-    // The connector's EchoResponder builds on the exact plan snapshot and then
-    // writes the complete response through the normal agent document path.
+    // The custom harness echoes the exact prompt, proving the connector passes
+    // the current plan snapshot through the normal agent document path.
     await client.mutation(api.handoff.send, { roomId: room.roomId, sessionToken });
 
     let agentPlan: Awaited<ReturnType<typeof readPlan>> | null = null;
@@ -114,12 +124,12 @@ async function main() {
     }
     if (!agentPlan) throw new Error("connector did not auto-write plan.md");
     if (agentPlan.version !== 2) throw new Error(`expected agent v2, got v${agentPlan.version}`);
-    if (!agentPlan.body.includes(INITIAL_PLAN)) throw new Error("Pi did not preserve the existing plan");
-    if (!agentPlan.body.includes(DISCUSSION)) throw new Error("Pi's plan did not include the new discussion");
+    if (!agentPlan.body.includes(INITIAL_PLAN)) throw new Error("Agent did not preserve the existing plan");
+    if (!agentPlan.body.includes(DISCUSSION)) throw new Error("Agent plan did not include the new discussion");
     if (agentPlan.lastAuthorKind !== "agent") throw new Error("v2 should be authored by the agent");
     log("real handoff built on plan.md and auto-wrote v2 ✓");
 
-    // A stale write cannot overwrite Pi's version.
+    // A stale write cannot overwrite the agent's version.
     let staleRejected = false;
     try {
       await client.mutation(api.documents.update, {
@@ -146,7 +156,7 @@ async function main() {
       summary: "Human review",
     });
     if (humanEdit.version !== 3) throw new Error("participant update should create v3");
-    log("participant built on Pi's v2 → v3 ✓");
+    log("participant built on the agent's v2 → v3 ✓");
 
     const history = await client.query(api.documents.history, {
       roomId: room.roomId,

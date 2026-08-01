@@ -109,9 +109,14 @@ export class ConvexRoomAgentClient implements RoomAgentClient {
   }
 
   async disconnect(agentConnectionId: string): Promise<void> {
-    await this.client().mutation(api.agent.disconnect, {
-      agentConnectionId: asConnId(agentConnectionId),
-    });
+    try {
+      await this.client().mutation(api.agent.disconnect, {
+        agentConnectionId: asConnId(agentConnectionId),
+      });
+    } finally {
+      this.#agentConnectionId = null;
+      await this.close();
+    }
   }
 
   async writeDocument(
@@ -123,14 +128,14 @@ export class ConvexRoomAgentClient implements RoomAgentClient {
   ): Promise<number> {
     if (!base) {
       // `documents.create` checks the indexed room/path pair transactionally. If
-      // another collaborator created the path after Pi's snapshot, this fails
+      // another collaborator created the path after the agent's snapshot, this fails
       // rather than replacing their document.
       const created = await this.client().mutation(api.documents.create, {
         roomId,
         agentConnectionId: asConnId(agentConnectionId),
         path,
         body,
-        summary: "Pi created the plan",
+        summary: "Agent created the plan",
       });
       return created.version;
     }
@@ -144,7 +149,7 @@ export class ConvexRoomAgentClient implements RoomAgentClient {
       documentId: base.id as Id<"documents">,
       body,
       expectedVersion: base.version,
-      summary: "Pi updated the plan",
+      summary: "Agent updated the plan",
     });
     return updated.version;
   }

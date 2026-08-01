@@ -1,24 +1,20 @@
 #!/usr/bin/env node
 /**
- * `room` — the local Pi connector CLI.
+ * `room` — connect a local coding-agent harness to a planning room.
  *
  * Usage:
- *   room connect <roomId> <connectionCode>
+ *   room connect <roomId> <connectionCode> --agent <name>
  *
- * In the room UI, choose "Connect a Pi" and run the displayed command. This
- * connector makes an outbound connection to the room relay, becomes the active
- * agent, and relays handoffs between the room and the local agent command.
- *
- * Environment:
- *   CONVEX_URL             Convex deployment URL (e.g. https://<project>.convex.cloud)
- *   ROOM_AGENT_COMMAND     Command that turns a stdin handoff into a stdout plan
- *                          (defaults to an echo responder for smoke testing)
- *   ROOM_AGENT_SUPPORTS_VISION  true if the model reads images
+ * Built-in harnesses: pi, codex, claude, cursor, opencode.
+ * A custom executable receives the prompt on stdin:
+ *   room connect <roomId> <code> --agent custom --command ./my-agent --arg run
  */
 
+import { parseArgs } from "node:util";
 import { runConnector, type Scheduler } from "./connector.ts";
+import { customHarness, getHarness, HARNESS_NAMES } from "./harnesses.ts";
 import { ConvexRoomAgentClient } from "./roomClient.ts";
-import { CommandResponder, EchoResponder } from "./responder.ts";
+import { HarnessResponder } from "./responder.ts";
 
 const POLL_INTERVAL_MS = 4000;
 
@@ -35,52 +31,96 @@ function log(message: string): void {
   console.log(`[room ${time}] ${message}`);
 }
 
+function usage(): string {
+  return [
+    "Usage: room connect <roomId> <connectionCode> --agent <name>",
+    "",
+    `Built-in agents: ${HARNESS_NAMES.join(", ")}`,
+    "Custom agent:   --agent custom --command <executable> [--arg <value> ...]",
+    "Optional:       --supports-vision",
+  ].join("\n");
+}
+
+function readCustomArgs(raw: string | undefined): string[] {
+  if (!raw) return [];
+  const parsed: unknown = JSON.parse(raw);
+  if (!Array.isArray(parsed) || !parsed.every((value) => typeof value === "string")) {
+    throw new Error("ROOM_AGENT_ARGS must be a JSON array of strings.");
+  }
+  return parsed;
+}
+
 async function main(): Promise<void> {
-  const [subcommand, roomIdArg, codeArg] = process.argv.slice(2);
-  if (subcommand !== "connect" || !roomIdArg || !codeArg) {
+  const { values, positionals } = parseArgs({
+    allowPositionals: true,
+    strict: true,
+    options: {
+      agent: { type: "string", short: "a" },
+      command: { type: "string" },
+      arg: { type: "string", multiple: true },
+      "supports-vision": { type: "boolean" },
+      help: { type: "boolean", short: "h" },
+    },
+  });
+
+  if (values.help) {
     // eslint-disable-next-line no-console
-    console.error("Usage: room connect <roomId> <connectionCode>");
-    process.exit(64);
+    console.log(usage());
+    return;
   }
 
-  const roomId = roomIdArg.toUpperCase();
-  const connectionCode = codeArg;
-
-  for (const envVar of ["CONVEX_URL"]) {
-    if (!process.env[envVar]) {
-      // eslint-disable-next-line no-console
-      console.error(`Missing required env var: ${envVar}`);
-      process.exit(1);
-    }
+  const [subcommand, roomIdArg, codeArg] = positionals;
+  const configuredCommand = values.command ?? process.env.ROOM_AGENT_COMMAND;
+  const agentName = values.agent ?? (configuredCommand ? "custom" : undefined);
+  if (subcommand !== "connect" || !roomIdArg || !codeArg || !agentName) {
+    // eslint-disable-next-line no-console
+    console.error(usage());
+    process.exitCode = 64;
+    return;
+  }
+  if (!process.env.CONVEX_URL) {
+    // eslint-disable-next-line no-console
+    console.error("Missing required env var: CONVEX_URL");
+    process.exitCode = 1;
+    return;
   }
 
-  const client = new ConvexRoomAgentClient();
-  const command = process.env.ROOM_AGENT_COMMAND;
-  const responder = command ? new CommandResponder(command) : new EchoResponder();
+  const harness = agentName === "custom"
+    ? customHarness(
+        configuredCommand ?? "",
+        values.arg ?? readCustomArgs(process.env.ROOM_AGENT_ARGS),
+      )
+    : getHarness(agentName);
+  const supportsVision = values["supports-vision"] === true
+    || process.env.ROOM_AGENT_SUPPORTS_VISION === "true";
 
   const controller = new AbortController();
   const stop = () => controller.abort();
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
 
-  log(`Connecting to room ${roomId}…`);
+  const roomId = roomIdArg.toUpperCase();
+  log(`Connecting ${harness.name} to room ${roomId}…`);
   try {
     await runConnector({
-      client,
-      responder,
+      client: new ConvexRoomAgentClient(),
+      responder: new HarnessResponder(harness),
       scheduler: new RealScheduler(),
       roomId,
-      connectionCode,
-      supportsVision: process.env.ROOM_AGENT_SUPPORTS_VISION === "true",
+      connectionCode: codeArg,
+      supportsVision,
       pollIntervalMs: POLL_INTERVAL_MS,
       stopSignal: controller.signal,
       log,
     });
-    process.exit(0);
-  } catch (err) {
-    log(`Fatal: ${err instanceof Error ? err.message : String(err)}`);
-    process.exit(1);
+  } catch (error) {
+    log(`Fatal: ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 1;
   }
 }
 
-void main();
+void main().catch((error: unknown) => {
+  // eslint-disable-next-line no-console
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 64;
+});

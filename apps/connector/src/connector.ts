@@ -1,16 +1,16 @@
 /**
- * Local Pi connector — orchestrates the room agent protocol.
+ * Local agent connector—orchestrates the room agent protocol.
  *
- * The connector is the participant's outbound link between a room and their
- * local Pi session (issues 0002, 0003, 0006). It:
+ * The connector is the participant's outbound link between a room and a local
+ * coding-agent harness. It:
  *   1. connects with a one-time code and becomes the active agent,
  *   2. heartbeats on the lease interval to keep the slot,
  *   3. listens (and polls as a fallback) for handoffs,
- *   4. streams Pi's response back into the room timeline,
+ *   4. streams the agent's response back into the room timeline,
  *   5. disconnects cleanly on stop.
  *
  * The protocol client and the agent responder are injected, so this module is
- * fully unit-testable without a Convex deployment or a real Pi session.
+ * fully unit-testable without a Convex deployment or a real agent process.
  */
 
 export interface ConnectResult {
@@ -47,7 +47,7 @@ export interface PendingHandoff {
     width?: number;
     height?: number;
   }>;
-  /** The plan version Pi read before responding, used as the OCC write base. */
+  /** The plan version the agent read before responding, used as the OCC write base. */
   workspaceDocument?: WorkspaceDocumentSnapshot;
 }
 
@@ -68,8 +68,8 @@ export interface RoomAgentClient {
   heartbeat(agentConnectionId: string): Promise<void>;
   disconnect(agentConnectionId: string): Promise<void>;
   /**
-   * Writes a workspace document only if it is still at the snapshot Pi read.
-   * A null snapshot means Pi observed that the path did not exist. A concurrent
+   * Writes a workspace document only if it is still at the snapshot the agent read.
+   * A null snapshot means the agent observed that the path did not exist. A concurrent
    * human edit is a conflict, never an invitation to overwrite.
    */
   writeDocument(
@@ -85,7 +85,7 @@ export interface RoomAgentClient {
 
 /**
  * Turns a handoff envelope into a streamed response. The default implementation
- * shells out to a local command (e.g. `pi`); tests inject a fake.
+ * delegates to a local harness; tests inject a fake.
  */
 export interface AgentResponder {
   stream(envelope: PendingHandoff, signal: AbortSignal): AsyncIterable<string>;

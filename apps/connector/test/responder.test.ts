@@ -1,14 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { CommandResponder, composeStdin } from "../src/responder.ts";
+import { customHarness } from "../src/harnesses.ts";
+import { HarnessResponder, composePrompt } from "../src/responder.ts";
 
 // A 1×1 transparent PNG as a data URL — lets us test image download without a
 // network round-trip or a storage bucket.
 const ONE_PIXEL_PNG =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 
-describe("CommandResponder", () => {
-  it("pipes the envelope body to the command's stdin", async () => {
-    const responder = new CommandResponder("cat");
+describe("HarnessResponder", () => {
+  it("pipes the envelope body to a custom harness", async () => {
+    const responder = new HarnessResponder(customHarness("cat"));
     const ac = new AbortController();
     const out: string[] = [];
 
@@ -23,8 +24,8 @@ describe("CommandResponder", () => {
     expect(out.join("")).toContain("Discuss the API.");
   });
 
-  it("downloads screenshots and appends their local file paths to stdin", async () => {
-    const responder = new CommandResponder("cat");
+  it("downloads screenshots and appends their local file paths to the prompt", async () => {
+    const responder = new HarnessResponder(customHarness("cat"));
     const ac = new AbortController();
     const out: string[] = [];
 
@@ -52,15 +53,31 @@ describe("CommandResponder", () => {
     expect(text).toMatch(/image-0\.png/);
     expect(text).toContain("image/png");
   });
+
+  it("reports a non-zero harness exit", async () => {
+    const responder = new HarnessResponder(
+      customHarness(process.execPath, ["-e", "process.exit(7)"]),
+    );
+    const read = async () => {
+      for await (const _chunk of responder.stream(
+        { pending: true, handoffId: "h1", body: "hello" },
+        new AbortController().signal,
+      )) {
+        // consume the stream
+      }
+    };
+
+    await expect(read()).rejects.toThrow(`${process.execPath} exited with code 7`);
+  });
 });
 
-describe("composeStdin", () => {
+describe("composePrompt", () => {
   it("returns the body unchanged when there are no attachments", () => {
-    expect(composeStdin("hello", { files: [] })).toBe("hello");
+    expect(composePrompt("hello", { files: [] })).toBe("hello");
   });
 
   it("includes the exact workspace version and asks for a complete updated document", () => {
-    const stdin = composeStdin("new discussion", { files: [] }, {
+    const stdin = composePrompt("new discussion", { files: [] }, {
       id: "doc-1",
       path: "plan.md",
       body: "# Existing plan\n\nKeep this.",
@@ -72,12 +89,12 @@ describe("composeStdin", () => {
   });
 
   it("tells the agent when plan.md needs to be created", () => {
-    const stdin = composeStdin("new discussion", { files: [] }, null);
+    const stdin = composePrompt("new discussion", { files: [] }, null);
     expect(stdin).toContain("No plan.md exists yet");
   });
 
   it("lists each attachment path, mime, and dimensions", () => {
-    const stdin = composeStdin("body", {
+    const stdin = composePrompt("body", {
       files: [{ path: "/tmp/a.png", mime: "image/png", width: 2, height: 3 }],
     });
     expect(stdin.startsWith("body")).toBe(true);

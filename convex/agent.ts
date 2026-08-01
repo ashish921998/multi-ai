@@ -79,7 +79,7 @@ export const connect = mutation({
     if (!freshRoom) fail("Room not found.");
     const holder = await findHolder(ctx.db, freshRoom);
     if (holder && isHealthy(holder)) {
-      fail("Another Pi is already active in this room. Try again once it disconnects.");
+      fail("Another agent is already active in this room. Try again once it disconnects.");
     }
 
     // Consume the code AND claim the slot. Both writes touch the room doc (via

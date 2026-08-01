@@ -62,7 +62,7 @@ export const send = mutation({
 
     const holder = await findHolder(ctx.db, room2);
     if (!holder || !isHealthy(holder)) {
-      fail("No active Pi agent is connected. Someone connect a Pi first.");
+      fail("No active agent is connected. Someone must connect an agent first.");
     }
 
     // Retry path: re-send the most recent failed handoff with its stored batch.
@@ -206,7 +206,7 @@ export const fetch = mutation({
     }
 
     // Snapshot the canonical plan in the same transaction that acknowledges the
-    // handoff. Pi's later write uses this version as its strict OCC base, so a
+    // handoff. The agent's later write uses this version as its strict OCC base, so a
     // participant edit during generation can never be overwritten.
     const plan = await ctx.db
       .query("documents")

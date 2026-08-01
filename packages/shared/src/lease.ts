@@ -1,9 +1,9 @@
 /**
  * Active-agent lease state machine (issues 0002 and 0006).
  *
- * The first connected Pi receives an active lease and sends regular heartbeats.
+ * The first connected agent receives an active lease and sends regular heartbeats.
  * Explicit disconnect releases it immediately; missing heartbeats for 30s marks
- * it offline. A second Pi cannot forcibly take over a healthy connection, but
+ * it offline. A second agent cannot forcibly take over a healthy connection, but
  * any participant may connect after the lease ends, and the same connection id
  * may reconnect.
  *

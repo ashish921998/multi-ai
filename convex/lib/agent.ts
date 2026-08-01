@@ -5,7 +5,7 @@
  * (`activeAgentConnectionId`). A connection holds a healthy lease while it is
  * marked active and its last heartbeat is within the timeout. The pure lease
  * math lives in @multi-ai/shared (`evaluateLease`); here we apply it to the
- * stored connection and, when stale, release the slot so a new Pi may connect.
+ * stored connection and, when stale, release the slot so a new agent may connect.
  */
 
 import type { DatabaseReader, DatabaseWriter } from "../_generated/server";
@@ -35,7 +35,7 @@ export function isHealthy(
 /**
  * Releases the active slot if the current holder has missed its heartbeats.
  * Returns whether a stale holder was reaped. Call this before any slot decision
- * (connect, send-handoff) so a timed-out Pi does not block the room.
+ * (connect, send-handoff) so a timed-out agent does not block the room.
  */
 export async function reapStaleHolder(
   db: DatabaseWriter,

@@ -1,18 +1,14 @@
 /**
  * Agent responders turn a handoff envelope into a streamed response.
  *
- * The default `CommandResponder` shells out to a local command (configured via
- * the `ROOM_AGENT_COMMAND` env var). It feeds the deterministic handoff envelope
- * to the command's stdin and streams its stdout back to the room as the Pi
- * response. Point this at `pi` (or any agent that reads a prompt from stdin and
- * writes a plan to stdout) so the repository, credentials, and API keys stay on
- * the participant's own laptop.
+ * `HarnessResponder` delegates one prompt to a local coding-agent harness and
+ * streams its plain-text stdout back to the room. The harness decides whether
+ * the prompt belongs on stdin or in an argument; the connector never uses a
+ * shell, so room content cannot become shell syntax.
  *
- * Vision (issue 0005, review #2): when a handoff carries screenshots, each one
- * is downloaded from its short-lived signed URL to a temp file and the file
- * paths are appended to the stdin prompt as an attachment manifest. A
- * vision-capable command (ROOM_AGENT_SUPPORTS_VISION=true) can then read those
- * images directly from disk; the bytes never have to round-trip through stdin.
+ * Screenshots are downloaded to short-lived local files and listed in the
+ * prompt. The harness can read those files without moving repository access or
+ * provider credentials off the participant's laptop.
  */
 
 import { spawn } from "node:child_process";
@@ -24,6 +20,7 @@ import type {
   PendingHandoff,
   WorkspaceDocumentSnapshot,
 } from "./connector.ts";
+import type { AgentHarness } from "./harnesses.ts";
 
 interface AttachmentFile {
   /** Absolute path the agent command can open(). */
@@ -33,28 +30,37 @@ interface AttachmentFile {
   height?: number;
 }
 
-export class CommandResponder implements AgentResponder {
-  constructor(private command: string) {}
+export class HarnessResponder implements AgentResponder {
+  constructor(private harness: AgentHarness) {}
 
   async *stream(handoff: PendingHandoff, signal: AbortSignal): AsyncIterable<string> {
     const attachments = await materializeScreenshots(handoff.screenshots ?? [], signal);
-    const stdin = composeStdin(
+    const prompt = composePrompt(
       handoff.body ?? "",
       attachments,
       handoff.workspaceDocument ?? null,
     );
-
-    const child = spawn(this.command, { shell: true, stdio: ["pipe", "pipe", "inherit"] });
-
-    signal.addEventListener("abort", () => {
-      child.kill("SIGTERM");
+    const invocation = this.harness.invoke(prompt);
+    const child = spawn(invocation.executable, invocation.args, {
+      stdio: ["pipe", "pipe", "inherit"],
     });
+    const abort = () => child.kill("SIGTERM");
+    signal.addEventListener("abort", abort, { once: true });
+    child.stdin.end(invocation.stdin);
 
-    child.stdin.end(stdin);
+    const completion = new Promise<number>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", (code) => resolve(code ?? 1));
+    });
 
     try {
       yield* iterateStdout(child.stdout);
+      const exitCode = await completion;
+      if (exitCode !== 0 && !signal.aborted) {
+        throw new Error(`${this.harness.name} exited with code ${exitCode}.`);
+      }
     } finally {
+      signal.removeEventListener("abort", abort);
       if (attachments.dir) {
         await rm(attachments.dir, { recursive: true, force: true }).catch(() => {});
       }
@@ -109,12 +115,12 @@ export async function materializeScreenshots(
 }
 
 /**
- * Builds the command prompt from the new discussion, the exact plan version Pi
- * will update, and any downloaded attachments. Supplying `null` explicitly
+ * Builds the harness prompt from the new discussion, the exact plan version the
+ * agent will update, and any downloaded attachments. Supplying `null` explicitly
  * means plan.md does not exist yet; omitting the argument preserves the old
  * envelope-only helper behavior used by callers outside the room connector.
  */
-export function composeStdin(
+export function composePrompt(
   body: string,
   attachments: { files: AttachmentFile[] },
   workspaceDocument?: WorkspaceDocumentSnapshot | null,
@@ -150,15 +156,5 @@ function mimeToExt(mime: string): string {
       return ".bmp";
     default:
       return ".img";
-  }
-}
-
-/** A responder that deterministically builds on plan.md for local smoke tests. */
-export class EchoResponder implements AgentResponder {
-  async *stream(handoff: PendingHandoff): AsyncIterable<string> {
-    const current = handoff.workspaceDocument?.body.trim() || "# Plan";
-    yield `${current}\n\n## Latest handoff\n\n`;
-    yield `Echo responder received ${handoff.includedSeqs?.length ?? 0} new message(s).\n\n`;
-    yield handoff.body ?? "";
   }
 }

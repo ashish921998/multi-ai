@@ -2,7 +2,7 @@
  * Connection-code issuance.
  *
  * Ports the `connect-code` Edge Function. A participant mints a one-time code;
- * the local Pi connector redeems it with `agent.connect`. Only the hash is
+ * the local agent connector redeems it with `agent.connect`. Only the hash is
  * persisted; the plaintext code is returned once to the participant (issue 0002).
  */
 

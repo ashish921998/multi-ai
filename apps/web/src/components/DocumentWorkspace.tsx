@@ -45,7 +45,7 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
           {selectedDoc
             ? "A living document that everyone in the room can edit"
             : props.latestAgentPlan
-              ? "Turn Pi's latest direction into a durable document"
+              ? "Turn the agent's latest direction into a durable document"
               : "Create a plan for the room to build on"}
         </span>
         <div className="workspace-actions">
@@ -53,7 +53,7 @@ export function DocumentWorkspace(props: DocumentWorkspaceProps) {
             New document
           </button>
           <button type="button" className="btn small" disabled={props.handoffInProgress} onClick={props.sendToAgent}>
-            {props.handoffInProgress ? "Waiting for Pi…" : "Send to agent ↗"}
+            {props.handoffInProgress ? "Waiting for agent…" : "Send to agent ↗"}
           </button>
         </div>
       </div>
@@ -117,7 +117,7 @@ function EmptyWorkspace(props: {
       <div className="plan-body">
         {props.latestAgentPlan
           ? props.latestAgentPlan.text
-          : "Discuss the requirement, create a plan, or send the discussion to Pi to start plan.md."}
+          : "Discuss the requirement, create a plan, or send the discussion to an agent to start plan.md."}
       </div>
       <div className="empty-workspace-action">
         <button type="button" className="btn secondary" onClick={props.onCreate}>
@@ -189,7 +189,7 @@ function DocumentEditor(props: {
         <div>
           <h3>{doc.path}</h3>
           <span className="hint">
-            v{doc.version} · last edited by {doc.lastAuthorKind === "agent" ? "Pi" : "a participant"}
+            v{doc.version} · last edited by {doc.lastAuthorKind === "agent" ? "the agent" : "a participant"}
           </span>
         </div>
         <div className="document-head-actions">
@@ -324,7 +324,7 @@ function VersionHistory(props: {
               className={`version-row${selectedVersion === entry.version ? " active" : ""}`}
               onClick={() => setSelectedVersion(entry.version)}
             >
-              <span><strong>v{entry.version}</strong> · {entry.authorKind === "agent" ? "Pi" : "participant"}</span>
+              <span><strong>v{entry.version}</strong> · {entry.authorKind === "agent" ? "agent" : "participant"}</span>
               <span className="hint">{entry.summary ?? "Saved"} · {formatDate(entry.createdAt)}</span>
             </button>
           ))
@@ -459,7 +459,7 @@ function NewDocumentDialog(props: {
     <div className="modal-backdrop" onClick={props.onClose}>
       <dialog open className="modal new-document-modal" aria-labelledby="new-document-title" onCancel={props.onClose} onClick={(event) => event.stopPropagation()}>
         <h3 id="new-document-title">New workspace document</h3>
-        <p className="sub">Use a Markdown or HTML path. Everyone in the room, including Pi, can build on it.</p>
+        <p className="sub">Use a Markdown or HTML path. Everyone in the room, including the connected agent, can build on it.</p>
         <div className="field">
           <label htmlFor="document-path">Path</label>
           <input id="document-path" className="input" value={path} onChange={(event) => setPath(event.target.value)} placeholder="specs/api.md" />
