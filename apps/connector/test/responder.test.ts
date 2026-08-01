@@ -66,6 +66,22 @@ describe("HarnessResponder", () => {
     expect(chunks.join("")).toBe(composePrompt(body, { files: [] }, null));
   });
 
+  it("accepts a successful harness that exits without reading a large prompt", async () => {
+    const responder = new HarnessResponder(
+      customHarness(process.execPath, ["-e", 'process.stdout.end("done")']),
+    );
+    const chunks: string[] = [];
+
+    for await (const chunk of responder.stream(
+      { pending: true, handoffId: "h1", body: "x".repeat(1_100_000) },
+      new AbortController().signal,
+    )) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.join("")).toBe("done");
+  });
+
   it("does not launch a harness when the signal is already aborted", async () => {
     const dir = await mkdtemp(join(tmpdir(), "room-responder-test-"));
     const marker = join(dir, "spawned");
@@ -200,6 +216,29 @@ describe("HarnessResponder", () => {
         }
       }
       expect(descendantAlive).toBe(false);
+    },
+  );
+
+  it(
+    "finishes when a descendant holds the exited harness's stdout open",
+    async () => {
+      const script = [
+        'const { spawn } = require("node:child_process");',
+        `const descendant = spawn(${JSON.stringify(process.execPath)}, ["-e", "setInterval(() => {}, 1_000)"], { stdio: ["ignore", "inherit", "ignore"] });`,
+        "descendant.unref();",
+        'process.stdout.write("done");',
+      ].join(" ");
+      const responder = new HarnessResponder(customHarness(process.execPath, ["-e", script]));
+      const chunks: string[] = [];
+
+      for await (const chunk of responder.stream(
+        { pending: true, handoffId: "h1", body: "hello" },
+        new AbortController().signal,
+      )) {
+        chunks.push(chunk);
+      }
+
+      expect(chunks.join("")).toBe("done");
     },
   );
 

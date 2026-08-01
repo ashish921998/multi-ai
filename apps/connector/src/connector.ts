@@ -119,12 +119,10 @@ export async function runConnector(deps: ConnectorDeps): Promise<void> {
   const agentConnectionId = result.agentConnectionId;
   log(`Connected to room ${result.roomId} as the active agent.`);
 
-  let inFlight = false;
+  let activeHandoff: Promise<void> | null = null;
   const disposers: Array<() => void> = [];
 
-  const handleHandoff = async () => {
-    if (inFlight || stopSignal.aborted) return;
-    inFlight = true;
+  const processHandoff = async () => {
     try {
       const handoff = await client.fetchHandoff(agentConnectionId);
       if (!handoff.pending || !handoff.handoffId) return;
@@ -174,9 +172,16 @@ export async function runConnector(deps: ConnectorDeps): Promise<void> {
       }
     } catch (err) {
       log(`Handoff error: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      inFlight = false;
     }
+  };
+
+  const handleHandoff = () => {
+    if (activeHandoff || stopSignal.aborted) return;
+    const task = processHandoff();
+    activeHandoff = task;
+    void task.finally(() => {
+      if (activeHandoff === task) activeHandoff = null;
+    });
   };
 
   disposers.push(scheduler.every(result.heartbeatIntervalMs, () => {
@@ -192,8 +197,8 @@ export async function runConnector(deps: ConnectorDeps): Promise<void> {
   return new Promise<void>((resolve) => {
     const finish = () => {
       for (const dispose of disposers) dispose();
-      client
-        .disconnect(agentConnectionId)
+      Promise.resolve(activeHandoff)
+        .then(() => client.disconnect(agentConnectionId))
         .catch((e) => log(`Disconnect failed: ${String(e)}`))
         .finally(() => {
           log("Disconnected.");

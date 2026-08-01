@@ -109,6 +109,14 @@ pnpm --filter @multi-ai/connector dev connect ROOM1234 ABCD-2345 \
   --agent custom --command ./my-agent --arg run --arg=--plain
 ```
 
+The legacy `ROOM_AGENT_COMMAND` setting is a literal executable path, not a shell
+command; put its arguments in `ROOM_AGENT_ARGS` as a JSON string array.
+
+The connector terminates the custom harness's descendant processes when the harness
+exits and when the connector is stopped. Do not use a custom harness to launch
+intentionally persistent helpers: development servers, language servers, and similar
+long-lived child processes will also be terminated.
+
 Add `--supports-vision` when the selected model can read the temporary image paths in
 the handoff. The connector stays reactive and updates `plan.md` only if the version
 the agent read is still current. Conflicts preserve the participant's edit and keep

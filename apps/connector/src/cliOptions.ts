@@ -67,11 +67,6 @@ export function parseCliCommand(
     if (!configuredCommand?.trim()) {
       throw new Error("A custom harness requires --command <executable>.");
     }
-    if (values.command === undefined && /\s/.test(configuredCommand.trim())) {
-      throw new Error(
-        "ROOM_AGENT_COMMAND must contain only the executable. Put arguments in ROOM_AGENT_ARGS as a JSON array of strings.",
-      );
-    }
     agent = {
       kind: "custom",
       executable: configuredCommand.trim(),

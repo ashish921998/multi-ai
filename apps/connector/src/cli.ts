@@ -86,7 +86,12 @@ async function main(): Promise<void> {
   } finally {
     process.off("SIGINT", stop);
     process.off("SIGTERM", stop);
-    await client.close().catch(() => {});
+    try {
+      await client.close();
+    } catch (error) {
+      log(`Close failed: ${error instanceof Error ? error.message : String(error)}`);
+      process.exitCode = 1;
+    }
   }
 }
 

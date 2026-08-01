@@ -131,6 +131,34 @@ describe("runConnector", () => {
     expect(client.calls).toContain("disconnect");
   });
 
+  it("finalizes an active handoff before disconnecting on stop", async () => {
+    const client = makeClient();
+    const responder: AgentResponder = {
+      async *stream(_handoff, signal) {
+        yield "partial";
+        await new Promise<void>((_resolve, reject) => {
+          const stop = () => reject(new Error("agent stopped"));
+          if (signal.aborted) stop();
+          else signal.addEventListener("abort", stop, { once: true });
+        });
+      },
+    };
+    const { controller, deps } = baseDeps(client, responder);
+
+    const done = runConnector(deps);
+    await flush();
+    client.nextHandoff();
+    await flush();
+
+    controller.abort();
+    await done;
+
+    expect(client.calls.indexOf("respond:failed")).toBeGreaterThan(-1);
+    expect(client.calls.indexOf("respond:failed")).toBeLessThan(
+      client.calls.indexOf("disconnect"),
+    );
+  });
+
   it("streams a handoff to the responder and completes it", async () => {
     const client = makeClient();
     const { controller, deps } = baseDeps(client, chunkedResponder(["Hello ", "world"]));

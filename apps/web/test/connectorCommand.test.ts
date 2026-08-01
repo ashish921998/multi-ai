@@ -25,6 +25,19 @@ describe("buildConnectorCommand", () => {
     );
   });
 
+  it("shell-quotes custom arguments containing metacharacters and quotes", () => {
+    expect(
+      buildConnectorCommand("room connect ROOM123 ABCD-2345", {
+        kind: "custom",
+        executable: "./my-agent",
+        args: [`it's a \"$HOME\"; rm -rf /`],
+        supportsVision: false,
+      }),
+    ).toBe(
+      String.raw`room connect ROOM123 ABCD-2345 --agent custom --command=./my-agent --arg='it'\''s a "$HOME"; rm -rf /'`,
+    );
+  });
+
   it("adds screenshot support when the selected model can read images", () => {
     expect(
       buildConnectorCommand("room connect ROOM123 ABCD-2345", {

@@ -50,14 +50,19 @@ describe("parseCliCommand", () => {
     });
   });
 
-  it("explains how to migrate shell-style environment commands", () => {
-    expect(() =>
+  it("preserves spaces in an environment-provided executable path", () => {
+    expect(
       parseCliCommand(["connect", "ROOM123", "ABCD-2345"], {
-        ROOM_AGENT_COMMAND: "my-agent --plain",
+        ROOM_AGENT_COMMAND: "/Users/example/My Agent/bin/agent",
+        ROOM_AGENT_ARGS: '["--plain"]',
       }),
-    ).toThrow(
-      "ROOM_AGENT_COMMAND must contain only the executable. Put arguments in ROOM_AGENT_ARGS as a JSON array of strings.",
-    );
+    ).toMatchObject({
+      agent: {
+        kind: "custom",
+        executable: "/Users/example/My Agent/bin/agent",
+        args: ["--plain"],
+      },
+    });
   });
 
   it("does not apply environment arguments to an explicit command", () => {

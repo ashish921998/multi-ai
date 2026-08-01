@@ -74,21 +74,11 @@ async function* runHarness(
     child.kill();
     throw new Error(`Could not open stdio pipes for ${harness.name}.`);
   }
-  let stdinError: Error | undefined;
-  stdin.once("error", (error) => {
+  let stdinError: NodeJS.ErrnoException | undefined;
+  stdin.once("error", (error: NodeJS.ErrnoException) => {
     stdinError = error;
   });
-  const completion = new Promise<ProcessOutcome>((resolve) => {
-    child.once("error", (error) => resolve({ error }));
-    child.once("close", (code, signal) => {
-      if (code !== null) resolve({ exitCode: code });
-      else if (signal) resolve({ signal });
-      else resolve({ exitCode: 1 });
-    });
-  });
 
-  let stopping = false;
-  let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
   const signalProcessTree = async (signalName: NodeJS.Signals): Promise<void> => {
     const pid = child.pid;
     if (!pid) {
@@ -107,6 +97,20 @@ async function* runHarness(
       child.kill(signalName);
     }
   };
+  const completion = new Promise<ProcessOutcome>((resolve) => {
+    child.once("error", (error) => resolve({ error }));
+    child.once("exit", (code, signal) => {
+      if (code !== null) resolve({ exitCode: code });
+      else if (signal) resolve({ signal });
+      else resolve({ exitCode: 1 });
+      // A descendant may still hold the inherited stdout pipe open after the
+      // harness exits. End the whole process tree so stdout can reach EOF.
+      void signalProcessTree("SIGKILL");
+    });
+  });
+
+  let stopping = false;
+  let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
   const stopChild = () => {
     if (stopping) return;
     stopping = true;
@@ -127,10 +131,10 @@ async function* runHarness(
     if ("signal" in outcome) {
       throw new Error(`${harness.name} was terminated by signal ${outcome.signal}.`);
     }
-    if (stdinError) throw stdinError;
     if (outcome.exitCode !== 0) {
       throw new Error(`${harness.name} exited with code ${outcome.exitCode}.`);
     }
+    if (stdinError && stdinError.code !== "EPIPE") throw stdinError;
   } finally {
     signal.removeEventListener("abort", stopChild);
     if (child.exitCode === null && child.signalCode === null) stopChild();
