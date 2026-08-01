@@ -84,6 +84,9 @@ export function useRoom(session: RoomSession | null, roomId: string): {
         headers: { "content-type": blob.type },
         body: blob,
       });
+      if (!postResult.ok) {
+        throw new Error(`Screenshot upload failed (${postResult.status}).`);
+      }
       const { storageId } = (await postResult.json()) as { storageId: string };
       const ref = await registerScreenshot({
         roomId,
