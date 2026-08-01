@@ -12,6 +12,7 @@
  */
 
 import spawn from "cross-spawn";
+import treeKill from "tree-kill";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -58,8 +59,6 @@ type ProcessOutcome =
   | { signal: NodeJS.Signals }
   | { error: Error };
 
-const PROCESS_EXIT_GRACE_MS = 250;
-
 async function* runHarness(
   harness: AgentHarness,
   prompt: string,
@@ -68,6 +67,7 @@ async function* runHarness(
   throwIfStopped(signal, harness.name);
   const child = spawn(harness.executable, harness.args, {
     stdio: ["pipe", "pipe", "inherit"],
+    detached: process.platform !== "win32",
   });
   const { stdin, stdout } = child;
   if (!stdin || !stdout) {
@@ -87,12 +87,31 @@ async function* runHarness(
     });
   });
 
+  let stopping = false;
   let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
-  let exitGraceTimer: ReturnType<typeof setTimeout> | undefined;
+  const signalProcessTree = async (signalName: NodeJS.Signals): Promise<void> => {
+    const pid = child.pid;
+    if (!pid) {
+      child.kill(signalName);
+      return;
+    }
+    if (process.platform === "win32") {
+      await new Promise<void>((resolve) => {
+        treeKill(pid, signalName, () => resolve());
+      });
+      return;
+    }
+    try {
+      process.kill(-pid, signalName);
+    } catch {
+      child.kill(signalName);
+    }
+  };
   const stopChild = () => {
-    if (child.exitCode !== null || child.signalCode !== null) return;
-    child.kill("SIGTERM");
-    forceKillTimer ??= setTimeout(() => child.kill("SIGKILL"), 1_000);
+    if (stopping) return;
+    stopping = true;
+    void signalProcessTree("SIGTERM");
+    forceKillTimer = setTimeout(() => void signalProcessTree("SIGKILL"), 1_000);
     forceKillTimer.unref();
   };
 
@@ -102,36 +121,22 @@ async function* runHarness(
 
   try {
     yield* iterateStdout(stdout);
-    let stoppedAfterOutput = false;
-    let outcome = await Promise.race([
-      completion,
-      new Promise<null>((resolve) => {
-        exitGraceTimer = setTimeout(() => resolve(null), PROCESS_EXIT_GRACE_MS);
-        exitGraceTimer.unref();
-      }),
-    ]);
-    if (exitGraceTimer) clearTimeout(exitGraceTimer);
-    if (outcome === null) {
-      stoppedAfterOutput = true;
-      stopChild();
-      outcome = await completion;
-    }
-
+    const outcome = await completion;
     if (signal.aborted) throw new Error(`${harness.name} was stopped.`);
     if ("error" in outcome) throw outcome.error;
-    if ("signal" in outcome && !stoppedAfterOutput) {
+    if ("signal" in outcome) {
       throw new Error(`${harness.name} was terminated by signal ${outcome.signal}.`);
     }
     if (stdinError) throw stdinError;
-    if ("exitCode" in outcome && outcome.exitCode !== 0 && !stoppedAfterOutput) {
+    if (outcome.exitCode !== 0) {
       throw new Error(`${harness.name} exited with code ${outcome.exitCode}.`);
     }
   } finally {
     signal.removeEventListener("abort", stopChild);
     if (child.exitCode === null && child.signalCode === null) stopChild();
     await completion;
-    if (exitGraceTimer) clearTimeout(exitGraceTimer);
     if (forceKillTimer) clearTimeout(forceKillTimer);
+    await signalProcessTree("SIGKILL");
   }
 }
 

@@ -163,24 +163,79 @@ describe("HarnessResponder", () => {
     await expect(finish()).rejects.toThrow(`${process.execPath} was stopped`);
   });
 
-  it("reaps a harness that closes stdout but keeps running", async () => {
-    const responder = new HarnessResponder(
-      customHarness(process.execPath, [
-        "-e",
-        'process.on("SIGTERM", () => process.exit(7)); process.stdout.write("done", () => { process.stdout.end(); setInterval(() => {}, 1_000); })',
-      ]),
-    );
-    const chunks: string[] = [];
+  it.skipIf(process.platform === "win32")(
+    "stops descendant processes when a harness is aborted",
+    async () => {
+      const script = [
+        'const { spawn } = require("node:child_process");',
+        `const descendant = spawn(${JSON.stringify(process.execPath)}, ["-e", "setInterval(() => {}, 1_000)"], { stdio: "ignore" });`,
+        "process.stdout.write(String(descendant.pid));",
+        "setInterval(() => {}, 1_000);",
+      ].join(" ");
+      const responder = new HarnessResponder(customHarness(process.execPath, ["-e", script]));
+      const controller = new AbortController();
+      const stream = responder.stream(
+        { pending: true, handoffId: "h1", body: "hello" },
+        controller.signal,
+      )[Symbol.asyncIterator]();
 
-    for await (const chunk of responder.stream(
-      { pending: true, handoffId: "h1", body: "hello" },
-      new AbortController().signal,
-    )) {
-      chunks.push(chunk);
-    }
+      const first = await stream.next();
+      const descendantPid = Number(first.value);
+      expect(descendantPid).toBeGreaterThan(0);
+      controller.abort();
+      const finish = async () => {
+        while (!(await stream.next()).done) {
+          // consume until process-tree shutdown closes stdout
+        }
+      };
+      await expect(finish()).rejects.toThrow(`${process.execPath} was stopped`);
 
-    expect(chunks.join("")).toBe("done");
-  });
+      let descendantAlive = true;
+      for (let attempt = 0; attempt < 20 && descendantAlive; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        try {
+          process.kill(descendantPid, 0);
+        } catch {
+          descendantAlive = false;
+        }
+      }
+      expect(descendantAlive).toBe(false);
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "cleans up descendants after a harness exits normally",
+    async () => {
+      const script = [
+        'const { spawn } = require("node:child_process");',
+        `const descendant = spawn(${JSON.stringify(process.execPath)}, ["-e", "setInterval(() => {}, 1_000)"], { stdio: "ignore" });`,
+        "descendant.unref();",
+        "process.stdout.write(String(descendant.pid));",
+      ].join(" ");
+      const responder = new HarnessResponder(customHarness(process.execPath, ["-e", script]));
+      const chunks: string[] = [];
+
+      for await (const chunk of responder.stream(
+        { pending: true, handoffId: "h1", body: "hello" },
+        new AbortController().signal,
+      )) {
+        chunks.push(chunk);
+      }
+
+      const descendantPid = Number(chunks.join(""));
+      expect(descendantPid).toBeGreaterThan(0);
+      let descendantAlive = true;
+      for (let attempt = 0; attempt < 20 && descendantAlive; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        try {
+          process.kill(descendantPid, 0);
+        } catch {
+          descendantAlive = false;
+        }
+      }
+      expect(descendantAlive).toBe(false);
+    },
+  );
 
   it("reports a missing harness executable", async () => {
     const responder = new HarnessResponder(customHarness("missing-room-agent-command"));

@@ -17,7 +17,8 @@
   "dependencies": {
     "@multi-ai/shared": "workspace:*",
     "convex": "^1.42.3",
-    "cross-spawn": "^7.0.6"
+    "cross-spawn": "^7.0.6",
+    "tree-kill": "^1.2.2"
   },
   "devDependencies": {
     "@types/cross-spawn": "^6.0.6",
