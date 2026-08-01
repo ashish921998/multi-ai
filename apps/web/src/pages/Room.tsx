@@ -1,6 +1,11 @@
 import { useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useMutation } from "convex/react";
+import {
+  BUILT_IN_AGENT_HARNESSES,
+  isHarnessName,
+  type HarnessName,
+} from "@multi-ai/shared";
 import { api } from "../../../../convex/api";
 import type { RoomState } from "../../../../convex/rooms";
 import { sessionStore, type RoomSession } from "../session.ts";
@@ -421,16 +426,8 @@ function Composer(props: {
   );
 }
 
-const AGENT_HARNESSES = [
-  { id: "pi", label: "Pi" },
-  { id: "codex", label: "Codex" },
-  { id: "claude", label: "Claude Code" },
-  { id: "cursor", label: "Cursor" },
-  { id: "opencode", label: "OpenCode" },
-] as const;
-
 function ConnectModal(props: { info: ConnectCodeResult; onClose: () => void }) {
-  const [harness, setHarness] = useState("codex");
+  const [harness, setHarness] = useState<HarnessName>("codex");
   const command = `${props.info.command} --agent ${harness}`;
 
   return (
@@ -447,9 +444,11 @@ function ConnectModal(props: { info: ConnectCodeResult; onClose: () => void }) {
             id="agent-harness"
             className="input"
             value={harness}
-            onChange={(event) => setHarness(event.target.value)}
+            onChange={(event) => {
+              if (isHarnessName(event.target.value)) setHarness(event.target.value);
+            }}
           >
-            {AGENT_HARNESSES.map((agent) => (
+            {BUILT_IN_AGENT_HARNESSES.map((agent) => (
               <option key={agent.id} value={agent.id}>{agent.label}</option>
             ))}
           </select>

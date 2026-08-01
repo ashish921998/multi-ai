@@ -169,6 +169,8 @@ export class ConvexRoomAgentClient implements RoomAgentClient {
 
   /** Closes the underlying WebSocket. Call on shutdown. */
   async close(): Promise<void> {
-    await this.#client?.close();
+    const client = this.#client;
+    this.#client = null;
+    await client?.close();
   }
 }

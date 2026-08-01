@@ -2,9 +2,9 @@
  * Agent responders turn a handoff envelope into a streamed response.
  *
  * `HarnessResponder` delegates one prompt to a local coding-agent harness and
- * streams its plain-text stdout back to the room. The harness decides whether
- * the prompt belongs on stdin or in an argument; the connector never uses a
- * shell, so room content cannot become shell syntax.
+ * streams its plain-text stdout back to the room. Every harness receives the
+ * prompt on stdin, and the connector never uses a shell, so room content stays
+ * out of process arguments and cannot become shell syntax.
  *
  * Screenshots are downloaded to short-lived local files and listed in the
  * prompt. The harness can read those files without moving repository access or
@@ -34,42 +34,76 @@ export class HarnessResponder implements AgentResponder {
   constructor(private harness: AgentHarness) {}
 
   async *stream(handoff: PendingHandoff, signal: AbortSignal): AsyncIterable<string> {
+    throwIfStopped(signal, this.harness.name);
     const attachments = await materializeScreenshots(handoff.screenshots ?? [], signal);
-    const prompt = composePrompt(
-      handoff.body ?? "",
-      attachments,
-      handoff.workspaceDocument ?? null,
-    );
-    const invocation = this.harness.invoke(prompt);
-    const child = spawn(invocation.executable, invocation.args, {
-      stdio: ["pipe", "pipe", "inherit"],
-    });
-    const abort = () => child.kill("SIGTERM");
-    signal.addEventListener("abort", abort, { once: true });
-    child.stdin.end(invocation.stdin);
-
-    const completion = new Promise<{ exitCode: number } | { error: Error }>((resolve) => {
-      child.once("error", (error) => resolve({ error }));
-      child.once("close", (code) => resolve({ exitCode: code ?? 1 }));
-    });
 
     try {
-      yield* iterateStdout(child.stdout);
-      const outcome = await completion;
-      if (signal.aborted) {
-        throw new Error(`${this.harness.name} was stopped.`);
-      }
-      if ("error" in outcome) throw outcome.error;
-      if (outcome.exitCode !== 0) {
-        throw new Error(`${this.harness.name} exited with code ${outcome.exitCode}.`);
-      }
+      throwIfStopped(signal, this.harness.name);
+      const prompt = composePrompt(
+        handoff.body ?? "",
+        attachments,
+        handoff.workspaceDocument ?? null,
+      );
+      yield* runHarness(this.harness, prompt, signal);
     } finally {
-      signal.removeEventListener("abort", abort);
       if (attachments.dir) {
         await rm(attachments.dir, { recursive: true, force: true }).catch(() => {});
       }
     }
   }
+}
+
+type ProcessOutcome = { exitCode: number } | { error: Error };
+
+async function* runHarness(
+  harness: AgentHarness,
+  prompt: string,
+  signal: AbortSignal,
+): AsyncIterable<string> {
+  throwIfStopped(signal, harness.name);
+  const child = spawn(harness.executable, harness.args, {
+    stdio: ["pipe", "pipe", "inherit"],
+  });
+  let stdinError: Error | undefined;
+  child.stdin.once("error", (error) => {
+    stdinError = error;
+  });
+  const completion = new Promise<ProcessOutcome>((resolve) => {
+    child.once("error", (error) => resolve({ error }));
+    child.once("close", (code) => resolve({ exitCode: code ?? 1 }));
+  });
+
+  let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
+  const stopChild = () => {
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    child.kill("SIGTERM");
+    forceKillTimer ??= setTimeout(() => child.kill("SIGKILL"), 1_000);
+    forceKillTimer.unref();
+  };
+
+  signal.addEventListener("abort", stopChild, { once: true });
+  if (signal.aborted) stopChild();
+  child.stdin.end(prompt);
+
+  try {
+    yield* iterateStdout(child.stdout);
+    const outcome = await completion;
+    if (signal.aborted) throw new Error(`${harness.name} was stopped.`);
+    if ("error" in outcome) throw outcome.error;
+    if (stdinError) throw stdinError;
+    if (outcome.exitCode !== 0) {
+      throw new Error(`${harness.name} exited with code ${outcome.exitCode}.`);
+    }
+  } finally {
+    signal.removeEventListener("abort", stopChild);
+    if (child.exitCode === null && child.signalCode === null) stopChild();
+    await completion;
+    if (forceKillTimer) clearTimeout(forceKillTimer);
+  }
+}
+
+function throwIfStopped(signal: AbortSignal, harnessName: string): void {
+  if (signal.aborted) throw new Error(`${harnessName} was stopped.`);
 }
 
 async function* iterateStdout(stdout: NodeJS.ReadableStream): AsyncIterable<string> {

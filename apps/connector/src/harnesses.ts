@@ -1,88 +1,59 @@
-export const HARNESS_NAMES = ["pi", "codex", "claude", "cursor", "opencode"] as const;
-
-export type HarnessName = (typeof HARNESS_NAMES)[number];
-
-export interface ProcessInvocation {
-  executable: string;
-  args: string[];
-  stdin?: string;
-}
+import {
+  BUILT_IN_AGENT_HARNESSES,
+  harnessLabel,
+  isHarnessName,
+  type HarnessName,
+} from "@multi-ai/shared";
 
 /**
- * The only seam between the room connector and a coding-agent harness.
- *
- * Harnesses differ in how they accept a prompt; everything else—room leases,
- * handoffs, streaming, attachments, and document OCC—stays in the connector.
+ * Static process configuration for one coding-agent harness. Every supported
+ * CLI accepts a piped prompt, so room content never enters the process argv.
  */
 export interface AgentHarness {
   name: string;
-  invoke(prompt: string): ProcessInvocation;
+  executable: string;
+  args: readonly string[];
 }
 
-const BUILT_INS: Record<HarnessName, AgentHarness> = {
+const BUILT_INS: Record<HarnessName, Omit<AgentHarness, "name">> = {
   pi: {
-    name: "Pi",
-    invoke: (prompt) => ({
-      executable: "pi",
-      args: ["--print", "--no-session", prompt],
-    }),
+    executable: "pi",
+    args: ["--print", "--no-session"],
   },
   codex: {
-    name: "Codex",
-    invoke: (prompt) => ({
-      executable: "codex",
-      args: ["exec", "--ephemeral", "--sandbox", "read-only", "--color", "never", "-"],
-      stdin: prompt,
-    }),
+    executable: "codex",
+    args: ["exec", "--ephemeral", "--sandbox", "read-only", "--color", "never", "-"],
   },
   claude: {
-    name: "Claude Code",
-    invoke: (prompt) => ({
-      executable: "claude",
-      args: [
-        "--print",
-        "--no-session-persistence",
-        "--permission-mode",
-        "plan",
-        "--output-format",
-        "text",
-      ],
-      stdin: prompt,
-    }),
+    executable: "claude",
+    args: [
+      "--print",
+      "--no-session-persistence",
+      "--permission-mode",
+      "plan",
+      "--output-format",
+      "text",
+    ],
   },
   cursor: {
-    name: "Cursor",
-    invoke: (prompt) => ({
-      executable: "cursor-agent",
-      args: ["--print", "--sandbox", "enabled", "--output-format", "text", prompt],
-    }),
+    executable: "cursor-agent",
+    args: ["--print", "--sandbox", "enabled", "--output-format", "text"],
   },
   opencode: {
-    name: "OpenCode",
-    invoke: (prompt) => ({
-      executable: "opencode",
-      args: ["run", "--format", "default", prompt],
-    }),
+    executable: "opencode",
+    args: ["run", "--format", "default"],
   },
 };
 
 export function getHarness(name: string): AgentHarness {
   if (!isHarnessName(name)) {
-    throw new Error(
-      `Unknown agent harness "${name}". Choose one of: ${HARNESS_NAMES.join(", ")}, custom.`,
-    );
+    const names = BUILT_IN_AGENT_HARNESSES.map((harness) => harness.id).join(", ");
+    throw new Error(`Unknown agent harness "${name}". Choose one of: ${names}, custom.`);
   }
-  return BUILT_INS[name];
+  return { name: harnessLabel(name), ...BUILT_INS[name] };
 }
 
-export function customHarness(executable: string, args: string[] = []): AgentHarness {
+export function customHarness(executable: string, args: readonly string[] = []): AgentHarness {
   if (!executable.trim()) throw new Error("A custom harness requires --command <executable>.");
-  return {
-    name: executable,
-    invoke: (prompt) => ({ executable, args, stdin: prompt }),
-  };
-}
-
-function isHarnessName(value: string): value is HarnessName {
-  return HARNESS_NAMES.some((name) => name === value);
+  return { name: executable, executable, args };
 }

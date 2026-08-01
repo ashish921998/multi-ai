@@ -10,9 +10,9 @@
  *   room connect <roomId> <code> --agent custom --command ./my-agent --arg run
  */
 
-import { parseArgs } from "node:util";
+import { parseCliCommand, usage } from "./cliOptions.ts";
 import { runConnector, type Scheduler } from "./connector.ts";
-import { customHarness, getHarness, HARNESS_NAMES } from "./harnesses.ts";
+import { customHarness, getHarness } from "./harnesses.ts";
 import { ConvexRoomAgentClient } from "./roomClient.ts";
 import { HarnessResponder } from "./responder.ts";
 
@@ -31,53 +31,25 @@ function log(message: string): void {
   console.log(`[room ${time}] ${message}`);
 }
 
-function usage(): string {
-  return [
-    "Usage: room connect <roomId> <connectionCode> --agent <name>",
-    "",
-    `Built-in agents: ${HARNESS_NAMES.join(", ")}`,
-    "Custom agent:   --agent custom --command <executable> [--arg <value> ...]",
-    "Optional:       --supports-vision",
-  ].join("\n");
-}
-
-function readCustomArgs(raw: string | undefined): string[] {
-  if (!raw) return [];
-  const parsed: unknown = JSON.parse(raw);
-  if (!Array.isArray(parsed) || !parsed.every((value) => typeof value === "string")) {
-    throw new Error("ROOM_AGENT_ARGS must be a JSON array of strings.");
-  }
-  return parsed;
-}
-
 async function main(): Promise<void> {
-  const { values, positionals } = parseArgs({
-    allowPositionals: true,
-    strict: true,
-    options: {
-      agent: { type: "string", short: "a" },
-      command: { type: "string" },
-      arg: { type: "string", multiple: true },
-      "supports-vision": { type: "boolean" },
-      help: { type: "boolean", short: "h" },
-    },
-  });
+  let command;
+  try {
+    command = parseCliCommand(process.argv.slice(2), process.env);
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error(error instanceof Error ? error.message : String(error));
+    // eslint-disable-next-line no-console
+    console.error(`\n${usage()}`);
+    process.exitCode = 64;
+    return;
+  }
 
-  if (values.help) {
+  if (command.kind === "help") {
     // eslint-disable-next-line no-console
     console.log(usage());
     return;
   }
 
-  const [subcommand, roomIdArg, codeArg] = positionals;
-  const configuredCommand = values.command ?? process.env.ROOM_AGENT_COMMAND;
-  const agentName = values.agent ?? (configuredCommand ? "custom" : undefined);
-  if (subcommand !== "connect" || !roomIdArg || !codeArg || !agentName) {
-    // eslint-disable-next-line no-console
-    console.error(usage());
-    process.exitCode = 64;
-    return;
-  }
   if (!process.env.CONVEX_URL) {
     // eslint-disable-next-line no-console
     console.error("Missing required env var: CONVEX_URL");
@@ -85,30 +57,25 @@ async function main(): Promise<void> {
     return;
   }
 
-  const harness = agentName === "custom"
-    ? customHarness(
-        configuredCommand ?? "",
-        values.arg ?? readCustomArgs(process.env.ROOM_AGENT_ARGS),
-      )
-    : getHarness(agentName);
-  const supportsVision = values["supports-vision"] === true
-    || process.env.ROOM_AGENT_SUPPORTS_VISION === "true";
+  const harness = command.agent.kind === "custom"
+    ? customHarness(command.agent.executable, command.agent.args)
+    : getHarness(command.agent.name);
 
   const controller = new AbortController();
   const stop = () => controller.abort();
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
 
-  const roomId = roomIdArg.toUpperCase();
-  log(`Connecting ${harness.name} to room ${roomId}…`);
+  const client = new ConvexRoomAgentClient();
+  log(`Connecting ${harness.name} to room ${command.roomId}…`);
   try {
     await runConnector({
-      client: new ConvexRoomAgentClient(),
+      client,
       responder: new HarnessResponder(harness),
       scheduler: new RealScheduler(),
-      roomId,
-      connectionCode: codeArg,
-      supportsVision,
+      roomId: command.roomId,
+      connectionCode: command.connectionCode,
+      supportsVision: command.supportsVision,
       pollIntervalMs: POLL_INTERVAL_MS,
       stopSignal: controller.signal,
       log,
@@ -116,11 +83,15 @@ async function main(): Promise<void> {
   } catch (error) {
     log(`Fatal: ${error instanceof Error ? error.message : String(error)}`);
     process.exitCode = 1;
+  } finally {
+    process.off("SIGINT", stop);
+    process.off("SIGTERM", stop);
+    await client.close().catch(() => {});
   }
 }
 
 void main().catch((error: unknown) => {
   // eslint-disable-next-line no-console
   console.error(error instanceof Error ? error.message : String(error));
-  process.exitCode = 64;
+  process.exitCode = 1;
 });

@@ -2,7 +2,7 @@
   "name": "multi-ai",
   "private": true,
   "version": "0.1.0",
-  "description": "Multiplayer AI Planning Room — V1 room backend, browser app, and local Pi connector.",
+  "description": "Multiplayer AI Planning Room — room backend, browser app, and local coding-agent connector.",
   "type": "module",
   "packageManager": "pnpm@10.15.1",
   "scripts": {

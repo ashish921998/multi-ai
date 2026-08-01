@@ -1,3 +1,6 @@
+import { access, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 import { customHarness } from "../src/harnesses.ts";
 import { HarnessResponder, composePrompt } from "../src/responder.ts";
@@ -22,6 +25,50 @@ describe("HarnessResponder", () => {
 
     expect(out.join("")).toContain("# Plan");
     expect(out.join("")).toContain("Discuss the API.");
+  });
+
+  it("pipes prompts larger than the process argument limit through stdin", async () => {
+    const body = "x".repeat(1_100_000);
+    const responder = new HarnessResponder(customHarness("cat"));
+    const chunks: string[] = [];
+
+    for await (const chunk of responder.stream(
+      { pending: true, handoffId: "h1", body },
+      new AbortController().signal,
+    )) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.join("")).toBe(composePrompt(body, { files: [] }, null));
+  });
+
+  it("does not launch a harness when the signal is already aborted", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "room-responder-test-"));
+    const marker = join(dir, "spawned");
+    const responder = new HarnessResponder(
+      customHarness(process.execPath, [
+        "-e",
+        `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "spawned")`,
+      ]),
+    );
+    const controller = new AbortController();
+    controller.abort();
+
+    const read = async () => {
+      for await (const _chunk of responder.stream(
+        { pending: true, handoffId: "h1", body: "hello" },
+        controller.signal,
+      )) {
+        // consume the stream
+      }
+    };
+
+    try {
+      await expect(read()).rejects.toThrow(`${process.execPath} was stopped`);
+      await expect(access(marker)).rejects.toThrow();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("downloads screenshots and appends their local file paths to the prompt", async () => {

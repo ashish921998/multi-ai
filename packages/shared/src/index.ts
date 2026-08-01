@@ -13,3 +13,4 @@ export * from "./handoff.ts";
 export * from "./lease.ts";
 export * from "./ratelimit.ts";
 export * from "./screenshots.ts";
+export * from "./agentHarnesses.ts";

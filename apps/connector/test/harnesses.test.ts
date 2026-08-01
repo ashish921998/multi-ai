@@ -1,35 +1,58 @@
 import { describe, expect, it } from "vitest";
-import { customHarness, getHarness, HARNESS_NAMES } from "../src/harnesses.ts";
+import type { HarnessName } from "@multi-ai/shared";
+import { customHarness, getHarness } from "../src/harnesses.ts";
 
-const PROMPT = "Review this room handoff; $(this is data, not shell syntax).";
+const BUILT_IN_CASES = [
+  {
+    id: "pi",
+    name: "Pi",
+    executable: "pi",
+    args: ["--print", "--no-session"],
+  },
+  {
+    id: "codex",
+    name: "Codex",
+    executable: "codex",
+    args: ["exec", "--ephemeral", "--sandbox", "read-only", "--color", "never", "-"],
+  },
+  {
+    id: "claude",
+    name: "Claude Code",
+    executable: "claude",
+    args: [
+      "--print",
+      "--no-session-persistence",
+      "--permission-mode",
+      "plan",
+      "--output-format",
+      "text",
+    ],
+  },
+  {
+    id: "cursor",
+    name: "Cursor",
+    executable: "cursor-agent",
+    args: ["--print", "--sandbox", "enabled", "--output-format", "text"],
+  },
+  {
+    id: "opencode",
+    name: "OpenCode",
+    executable: "opencode",
+    args: ["run", "--format", "default"],
+  },
+] satisfies ReadonlyArray<{
+  id: HarnessName;
+  name: string;
+  executable: string;
+  args: readonly string[];
+}>;
 
 describe("built-in agent harnesses", () => {
-  it.each(HARNESS_NAMES)("builds a safe %s invocation containing the prompt once", (name) => {
-    const invocation = getHarness(name).invoke(PROMPT);
-    const promptCopies = [invocation.stdin, ...invocation.args]
-      .filter((value) => value === PROMPT);
-
-    expect(invocation.executable).not.toContain(" ");
-    expect(promptCopies).toHaveLength(1);
-  });
-
-  it("uses stdin for harnesses with native piped-prompt support", () => {
-    expect(getHarness("codex").invoke(PROMPT)).toMatchObject({
-      executable: "codex",
-      args: ["exec", "--ephemeral", "--sandbox", "read-only", "--color", "never", "-"],
-      stdin: PROMPT,
-    });
-    expect(getHarness("claude").invoke(PROMPT)).toMatchObject({
-      executable: "claude",
-      args: [
-        "--print",
-        "--no-session-persistence",
-        "--permission-mode",
-        "plan",
-        "--output-format",
-        "text",
-      ],
-      stdin: PROMPT,
+  it.each(BUILT_IN_CASES)("defines the exact $id process configuration", (expected) => {
+    expect(getHarness(expected.id)).toEqual({
+      name: expected.name,
+      executable: expected.executable,
+      args: expected.args,
     });
   });
 
@@ -39,11 +62,11 @@ describe("built-in agent harnesses", () => {
 });
 
 describe("custom agent harness", () => {
-  it("passes fixed arguments separately and the room prompt on stdin", () => {
-    expect(customHarness("my-agent", ["run", "--plain"]).invoke(PROMPT)).toEqual({
+  it("keeps fixed arguments separate from the executable", () => {
+    expect(customHarness("my-agent", ["run", "--plain"])).toEqual({
+      name: "my-agent",
       executable: "my-agent",
       args: ["run", "--plain"],
-      stdin: PROMPT,
     });
   });
 

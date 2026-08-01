@@ -48,6 +48,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@multi-ai/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       convex:
         specifier: ^1.42.3
         version: 1.42.3(react@18.3.1)

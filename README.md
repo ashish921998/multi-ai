@@ -99,9 +99,9 @@ pnpm --filter @multi-ai/connector dev connect ROOM1234 ABCD-2345 --agent codex
 ```
 
 Built-in harness names are `pi`, `codex`, `claude`, `cursor`, and `opencode`. Each uses
-the harness's non-interactive plain-text mode; Codex and Claude Code run in their
-read-only planning modes, and Cursor runs sandboxed. To integrate another executable, pass
-fixed arguments separately; the connector writes the room prompt to stdin:
+the harness's non-interactive plain-text mode and receives the room prompt on stdin; Codex
+and Claude Code run in their read-only planning modes, and Cursor runs sandboxed. To
+integrate another executable, pass fixed arguments separately:
 
 ```sh
 CONVEX_URL=https://your-deployment.convex.cloud \
