@@ -103,6 +103,8 @@ export interface ConnectorDeps {
   connectionCode: string;
   supportsVision: boolean;
   pollIntervalMs: number;
+  /** Maximum time to finalize an active handoff after an explicit stop. */
+  shutdownDrainTimeoutMs: number;
   stopSignal: AbortSignal;
   log: (message: string) => void;
 }
@@ -195,20 +197,42 @@ export async function runConnector(deps: ConnectorDeps): Promise<void> {
   }));
 
   return new Promise<void>((resolve) => {
-    const finish = () => {
+    const finish = async () => {
       for (const dispose of disposers) dispose();
-      Promise.resolve(activeHandoff)
-        .then(() => client.disconnect(agentConnectionId))
-        .catch((e) => log(`Disconnect failed: ${String(e)}`))
-        .finally(() => {
-          log("Disconnected.");
-          resolve();
-        });
+      const handoffAtStop = activeHandoff;
+      if (
+        handoffAtStop &&
+        !(await settlesWithin(handoffAtStop, deps.shutdownDrainTimeoutMs))
+      ) {
+        log(
+          `Handoff did not settle within ${deps.shutdownDrainTimeoutMs}ms; forcing disconnect.`,
+        );
+      }
+      try {
+        await client.disconnect(agentConnectionId);
+      } catch (error) {
+        log(`Disconnect failed: ${String(error)}`);
+      } finally {
+        log("Disconnected.");
+        resolve();
+      }
     };
     if (stopSignal.aborted) {
-      finish();
+      void finish();
     } else {
-      stopSignal.addEventListener("abort", finish, { once: true });
+      stopSignal.addEventListener("abort", () => void finish(), { once: true });
     }
   });
+}
+
+async function settlesWithin(task: Promise<void>, timeoutMs: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<false>((resolve) => {
+    timer = setTimeout(() => resolve(false), timeoutMs);
+  });
+  try {
+    return await Promise.race([task.then(() => true, () => true), timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }

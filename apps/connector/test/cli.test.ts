@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { BUILT_IN_AGENT_HARNESSES } from "@multi-ai/shared";
 import { expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
@@ -13,6 +14,8 @@ it("prints the connector CLI help without requiring backend configuration", asyn
   });
 
   expect(stdout).toContain("room connect <roomId> <connectionCode> --agent <name>");
-  expect(stdout).toContain("pi, codex, claude, cursor, opencode");
+  expect(stdout).toContain(
+    BUILT_IN_AGENT_HARNESSES.map((harness) => harness.id).join(", "),
+  );
   expect(stderr).toBe("");
 });

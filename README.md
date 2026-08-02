@@ -112,10 +112,17 @@ pnpm --filter @multi-ai/connector dev connect ROOM1234 ABCD-2345 \
 The legacy `ROOM_AGENT_COMMAND` setting is a literal executable path, not a shell
 command; put its arguments in `ROOM_AGENT_ARGS` as a JSON string array.
 
-The connector terminates the custom harness's descendant processes when the harness
-exits and when the connector is stopped. Do not use a custom harness to launch
-intentionally persistent helpers: development servers, language servers, and similar
-long-lived child processes will also be terminated.
+The connector terminates descendants in the custom harness's process tree/group when
+the harness exits or the connector stops. Do not launch intentionally persistent
+helpers: development servers, language servers, and similar child processes will also
+be terminated. A process that deliberately detaches into a separate OS session may
+escape cleanup; the connector stops waiting on its inherited stdout after the harness
+exits, and custom harnesses should not detach persistent processes.
+
+On SIGINT/SIGTERM, the connector gives an active handoff 5 seconds to record its final
+status before forcing disconnect. Configure this shutdown-only bound with
+`--shutdown-drain-timeout-ms=<milliseconds>` or
+`ROOM_AGENT_SHUTDOWN_DRAIN_TIMEOUT_MS`; it does not limit normal harness runtime.
 
 Add `--supports-vision` when the selected model can read the temporary image paths in
 the handoff. The connector stays reactive and updates `plan.md` only if the version

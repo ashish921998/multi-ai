@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { buildConnectorCommand } from "../src/lib/connectorCommand.ts";
+import {
+  buildConnectorCommand,
+  parseCustomArguments,
+} from "../src/lib/connectorCommand.ts";
+
+describe("parseCustomArguments", () => {
+  it("trims argument lines and removes blank ones", () => {
+    expect(parseCustomArguments(" run \n   \n\t--plain\t\n")).toEqual(["run", "--plain"]);
+  });
+});
 
 describe("buildConnectorCommand", () => {
   it("appends a built-in harness selection", () => {

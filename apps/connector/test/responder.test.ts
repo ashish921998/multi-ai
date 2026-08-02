@@ -243,6 +243,31 @@ describe("HarnessResponder", () => {
   );
 
   it.skipIf(process.platform === "win32")(
+    "does not wait indefinitely for stdout held by a detached descendant",
+    async () => {
+      const script = [
+        'const { spawn } = require("node:child_process");',
+        `const descendant = spawn(${JSON.stringify(process.execPath)}, ["-e", "setTimeout(() => {}, 1_000)"], { detached: true, stdio: ["ignore", "inherit", "ignore"] });`,
+        "descendant.unref();",
+        'process.stdout.write("done");',
+      ].join(" ");
+      const responder = new HarnessResponder(customHarness(process.execPath, ["-e", script]));
+      const startedAt = Date.now();
+      const chunks: string[] = [];
+
+      for await (const chunk of responder.stream(
+        { pending: true, handoffId: "h1", body: "hello" },
+        new AbortController().signal,
+      )) {
+        chunks.push(chunk);
+      }
+
+      expect(chunks.join("")).toBe("done");
+      expect(Date.now() - startedAt).toBeLessThan(500);
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
     "cleans up descendants after a harness exits normally",
     async () => {
       const script = [

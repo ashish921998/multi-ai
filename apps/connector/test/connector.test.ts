@@ -105,6 +105,7 @@ function baseDeps(client: RoomAgentClient, responder: AgentResponder) {
       connectionCode: "ABCD-2345",
       supportsVision: false,
       pollIntervalMs: 5000,
+      shutdownDrainTimeoutMs: 20,
       stopSignal: controller.signal,
       log: () => {},
     },
@@ -129,6 +130,33 @@ describe("runConnector", () => {
     controller.abort();
     await done;
     expect(client.calls).toContain("disconnect");
+  });
+
+  it("disconnects after the shutdown drain limit when a handoff request stalls", async () => {
+    const client = makeClient({
+      async fetchHandoff() {
+        return await new Promise<never>(() => {});
+      },
+    });
+    const messages: string[] = [];
+    const { controller, deps } = baseDeps(client, chunkedResponder(["unused"]));
+    deps.log = (message) => messages.push(message);
+
+    const done = runConnector(deps);
+    await flush();
+    client.nextHandoff();
+    await flush();
+
+    controller.abort();
+    await Promise.race([
+      done,
+      new Promise<never>((_resolve, reject) =>
+        setTimeout(() => reject(new Error("connector shutdown stalled")), 200),
+      ),
+    ]);
+
+    expect(client.calls).toContain("disconnect");
+    expect(messages).toContain("Handoff did not settle within 20ms; forcing disconnect.");
   });
 
   it("finalizes an active handoff before disconnecting on stop", async () => {

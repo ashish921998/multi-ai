@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { parseCliCommand } from "../src/cliOptions.ts";
+import {
+  DEFAULT_SHUTDOWN_DRAIN_TIMEOUT_MS,
+  parseCliCommand,
+} from "../src/cliOptions.ts";
 
 describe("parseCliCommand", () => {
   it("parses a built-in connect command into a typed selection", () => {
@@ -14,7 +17,48 @@ describe("parseCliCommand", () => {
       connectionCode: "ABCD-2345",
       agent: { kind: "builtIn", name: "codex" },
       supportsVision: true,
+      shutdownDrainTimeoutMs: DEFAULT_SHUTDOWN_DRAIN_TIMEOUT_MS,
     });
+  });
+
+  it("parses an explicit shutdown drain limit", () => {
+    expect(
+      parseCliCommand(
+        [
+          "connect",
+          "ROOM123",
+          "ABCD-2345",
+          "--agent",
+          "codex",
+          "--shutdown-drain-timeout-ms=1250",
+        ],
+        {},
+      ),
+    ).toMatchObject({ shutdownDrainTimeoutMs: 1250 });
+  });
+
+  it("reads the shutdown drain limit from the environment", () => {
+    expect(
+      parseCliCommand(["connect", "ROOM123", "ABCD-2345", "--agent", "codex"], {
+        ROOM_AGENT_SHUTDOWN_DRAIN_TIMEOUT_MS: "2500",
+      }),
+    ).toMatchObject({ shutdownDrainTimeoutMs: 2500 });
+  });
+
+  it("rejects an invalid shutdown drain limit", () => {
+    expect(() =>
+      parseCliCommand(
+        [
+          "connect",
+          "ROOM123",
+          "ABCD-2345",
+          "--agent",
+          "codex",
+          "--shutdown-drain-timeout-ms=-1",
+        ],
+        {},
+      ),
+    ).toThrow("Shutdown drain timeout must be a non-negative integer");
   });
 
   it("parses a custom executable and keeps each fixed argument separate", () => {

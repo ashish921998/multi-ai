@@ -1,5 +1,12 @@
 import type { HarnessName } from "@multi-ai/shared";
 
+export function parseCustomArguments(value: string): string[] {
+  return value
+    .split(/\r?\n/)
+    .map((argument) => argument.trim())
+    .filter(Boolean);
+}
+
 export type ConnectorHarnessSelection = (
   | { kind: "builtIn"; name: HarnessName }
   | { kind: "custom"; executable: string; args: readonly string[] }

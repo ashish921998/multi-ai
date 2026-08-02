@@ -97,6 +97,8 @@ async function* runHarness(
       child.kill(signalName);
     }
   };
+  let stdoutCleanupTimer: ReturnType<typeof setTimeout> | undefined;
+  let stdoutForcedClosed = false;
   const completion = new Promise<ProcessOutcome>((resolve) => {
     child.once("error", (error) => resolve({ error }));
     child.once("exit", (code, signal) => {
@@ -104,8 +106,13 @@ async function* runHarness(
       else if (signal) resolve({ signal });
       else resolve({ exitCode: 1 });
       // A descendant may still hold the inherited stdout pipe open after the
-      // harness exits. End the whole process tree so stdout can reach EOF.
+      // harness exits. End the process group, then stop waiting on the pipe if
+      // a deliberately detached descendant escaped that group.
       void signalProcessTree("SIGKILL");
+      stdoutCleanupTimer = setTimeout(() => {
+        stdoutForcedClosed = true;
+        stdout.destroy();
+      }, 250);
     });
   });
 
@@ -124,7 +131,11 @@ async function* runHarness(
   stdin.end(prompt);
 
   try {
-    yield* iterateStdout(stdout);
+    try {
+      yield* iterateStdout(stdout);
+    } catch (error) {
+      if (!stdoutForcedClosed) throw error;
+    }
     const outcome = await completion;
     if (signal.aborted) throw new Error(`${harness.name} was stopped.`);
     if ("error" in outcome) throw outcome.error;
@@ -140,6 +151,7 @@ async function* runHarness(
     if (child.exitCode === null && child.signalCode === null) stopChild();
     await completion;
     if (forceKillTimer) clearTimeout(forceKillTimer);
+    if (stdoutCleanupTimer) clearTimeout(stdoutCleanupTimer);
     await signalProcessTree("SIGKILL");
   }
 }

@@ -77,6 +77,7 @@ async function main(): Promise<void> {
       connectionCode: command.connectionCode,
       supportsVision: command.supportsVision,
       pollIntervalMs: POLL_INTERVAL_MS,
+      shutdownDrainTimeoutMs: command.shutdownDrainTimeoutMs,
       stopSignal: controller.signal,
       log,
     });

@@ -12,7 +12,10 @@ import { sessionStore, type RoomSession } from "../session.ts";
 import { useRoom } from "../useRoom.ts";
 import { DocumentWorkspace } from "../components/DocumentWorkspace.tsx";
 import { ScreenshotImg } from "../components/ScreenshotImg.tsx";
-import { buildConnectorCommand } from "../lib/connectorCommand.ts";
+import {
+  buildConnectorCommand,
+  parseCustomArguments,
+} from "../lib/connectorCommand.ts";
 
 type RoomMessage = RoomState["messages"][number];
 type RoomParticipant = RoomState["participants"][number];
@@ -440,7 +443,7 @@ function ConnectModal(props: { info: ConnectCodeResult; onClose: () => void }) {
       ? {
           kind: "custom",
           executable: customExecutable,
-          args: customArgs.split(/\r?\n/).filter((arg) => arg.length > 0),
+          args: parseCustomArguments(customArgs),
           supportsVision,
         }
       : { kind: "builtIn", name: harness, supportsVision },

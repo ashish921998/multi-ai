@@ -5,6 +5,8 @@ import {
   type HarnessName,
 } from "@multi-ai/shared";
 
+export const DEFAULT_SHUTDOWN_DRAIN_TIMEOUT_MS = 5_000;
+
 export type AgentSelection =
   | { kind: "builtIn"; name: HarnessName }
   | { kind: "custom"; executable: string; args: readonly string[] };
@@ -17,6 +19,7 @@ export type CliCommand =
       connectionCode: string;
       agent: AgentSelection;
       supportsVision: boolean;
+      shutdownDrainTimeoutMs: number;
     };
 
 export function usage(): string {
@@ -27,6 +30,7 @@ export function usage(): string {
     `Built-in agents: ${names}`,
     "Custom agent:   --agent custom --command <executable> [--arg=<value> ...]",
     "Optional:       --supports-vision",
+    `                --shutdown-drain-timeout-ms=<milliseconds> (default ${DEFAULT_SHUTDOWN_DRAIN_TIMEOUT_MS})`,
   ].join("\n");
 }
 
@@ -43,6 +47,7 @@ export function parseCliCommand(
       command: { type: "string" },
       arg: { type: "string", multiple: true },
       "supports-vision": { type: "boolean" },
+      "shutdown-drain-timeout-ms": { type: "string" },
       help: { type: "boolean", short: "h" },
     },
   });
@@ -89,7 +94,19 @@ export function parseCliCommand(
     agent,
     supportsVision:
       values["supports-vision"] === true || env.ROOM_AGENT_SUPPORTS_VISION === "true",
+    shutdownDrainTimeoutMs: readShutdownDrainTimeout(
+      values["shutdown-drain-timeout-ms"] ?? env.ROOM_AGENT_SHUTDOWN_DRAIN_TIMEOUT_MS,
+    ),
   };
+}
+
+function readShutdownDrainTimeout(raw: string | undefined): number {
+  if (raw === undefined) return DEFAULT_SHUTDOWN_DRAIN_TIMEOUT_MS;
+  const timeout = Number(raw);
+  if (!Number.isSafeInteger(timeout) || timeout < 0) {
+    throw new Error("Shutdown drain timeout must be a non-negative integer in milliseconds.");
+  }
+  return timeout;
 }
 
 function readCustomArgs(raw: string | undefined): string[] {
