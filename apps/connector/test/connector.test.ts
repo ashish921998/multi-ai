@@ -93,6 +93,20 @@ function flush(): Promise<void> {
   return new Promise((r) => setTimeout(r, 0));
 }
 
+async function waitForConnectorShutdown(done: Promise<void>): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      done,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error("connector shutdown stalled")), 200);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 function baseDeps(client: RoomAgentClient, responder: AgentResponder) {
   const controller = new AbortController();
   return {
@@ -148,12 +162,7 @@ describe("runConnector", () => {
     await flush();
 
     controller.abort();
-    await Promise.race([
-      done,
-      new Promise<never>((_resolve, reject) =>
-        setTimeout(() => reject(new Error("connector shutdown stalled")), 200),
-      ),
-    ]);
+    await waitForConnectorShutdown(done);
 
     expect(client.calls).toContain("disconnect");
     expect(messages).toContain("Handoff did not settle within 20ms; forcing disconnect.");
@@ -173,12 +182,7 @@ describe("runConnector", () => {
     await flush();
     controller.abort();
 
-    await Promise.race([
-      done,
-      new Promise<never>((_resolve, reject) =>
-        setTimeout(() => reject(new Error("connector shutdown stalled")), 200),
-      ),
-    ]);
+    await waitForConnectorShutdown(done);
 
     expect(messages).toContain("Disconnect failed: timed out after 20ms.");
     expect(messages.at(-1)).toBe("Disconnected.");

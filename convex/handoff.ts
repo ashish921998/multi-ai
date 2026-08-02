@@ -26,7 +26,7 @@ import { allocateSeq } from "./lib/seq";
 import { findHolder, isHealthy, reapStaleHolder } from "./lib/agent";
 import { loadMessageContext } from "./lib/messages";
 import { isActiveHandoff } from "./lib/status";
-import { buildEnvelopeFromRows } from "./lib/handoff";
+import { buildEnvelopeFromRows, FAILED_RESPONSE_SUFFIX } from "./lib/handoff";
 // (the set of statuses that block the next "Send to agent" lives in lib/status.ts)
 
 // ---------------------------------------------------------------------------
@@ -286,7 +286,7 @@ export const respond = mutation({
         const prev = await currentText(ctx.db, handoff.agentMessageId);
         await ctx.db.patch(handoff.agentMessageId, {
           status: "complete",
-          text: `${prev}\n\n_(response failed — retry available)_`,
+          text: `${prev}${FAILED_RESPONSE_SUFFIX}`,
         });
       }
       // Release the in-flight slot so the failed handoff can be retried.

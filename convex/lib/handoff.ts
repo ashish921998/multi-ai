@@ -13,6 +13,8 @@
 import { buildHandoffEnvelope } from "@multi-ai/shared";
 import type { HandoffEnvelope, RoomMessage, ScreenshotRef } from "@multi-ai/shared";
 
+export const FAILED_RESPONSE_SUFFIX = "\n\n_(response failed — retry available)_";
+
 export interface MessageRow {
   _id: string;
   seq: number;

@@ -11,9 +11,8 @@
 import type { DatabaseReader, DatabaseWriter } from "../_generated/server";
 import type { Doc } from "../_generated/dataModel";
 import { evaluateLease } from "@multi-ai/shared";
+import { FAILED_RESPONSE_SUFFIX } from "./handoff";
 import { isActiveHandoff } from "./status";
-
-const FAILED_RESPONSE_SUFFIX = "\n\n_(response failed — retry available)_";
 
 /** The connection currently holding the room's active slot, or null. */
 export async function findHolder(
