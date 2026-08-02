@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { useMutation } from "convex/react";
 import {
   BUILT_IN_AGENT_HARNESSES,
@@ -16,6 +16,7 @@ import {
   buildConnectorCommand,
   parseCustomArguments,
 } from "../lib/connectorCommand.ts";
+import "./landing.css";
 
 type RoomMessage = RoomState["messages"][number];
 type RoomParticipant = RoomState["participants"][number];
@@ -74,53 +75,89 @@ function JoinGate(props: { roomId: string; onJoined: (s: RoomSession) => void })
   }
 
   return (
-    <div className="app">
-      <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark">↗</span>
-          <span>Planning Room</span>
-        </div>
-        <div className="topbar-meta">
-          <span className="room-code">{props.roomId}</span>
-        </div>
-      </header>
-      <main className="center-screen">
-        <div className="card">
-          <h1>Join the room</h1>
-          <p className="sub">Enter the password and the name others will see.</p>
-          <div className="field">
-            <label htmlFor="join-display-name">Display name</label>
-            <input
-              id="join-display-name"
-              className="input"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              maxLength={40}
-              placeholder="Your name"
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="join-room-password">Room password</label>
-            <input
-              id="join-room-password"
-              className="input"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Room password"
-            />
-          </div>
-          {error && <div className="error">{error}</div>}
-          <button type="button"
-            className="btn"
-            style={{ width: "100%" }}
-            disabled={busy || !password || !displayName.trim()}
-            onClick={join}
+    <div className="lp lp-join-page">
+      <svg className="lp-grain" aria-hidden="true">
+        <filter id="lp-join-grain-filter">
+          <feTurbulence type="fractalNoise" baseFrequency="0.82" numOctaves="4" stitchTiles="stitch" />
+        </filter>
+        <rect width="100%" height="100%" filter="url(#lp-join-grain-filter)" />
+      </svg>
+
+      <div className="lp-inner lp-join-page-inner">
+        <header className="lp-top">
+          <Link className="lp-wordmark" to="/">
+            planning room
+          </Link>
+          <span className="lp-room-code">{props.roomId}</span>
+        </header>
+
+        <main className="lp-join-main">
+          <p className="lp-eyebrow lp-rise">You&apos;re invited</p>
+          <h1 className="lp-join-title lp-rise d2">
+            Step into the <span className="lp-serif">room.</span>
+          </h1>
+          <p className="lp-sub lp-rise d3">
+            Use the password from your invite and pick the name everyone will see.
+          </p>
+
+          <form
+            className="lp-box lp-join-box lp-rise d4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void join();
+            }}
           >
-            {busy ? "Joining…" : "Join room"}
-          </button>
-        </div>
-      </main>
+            <div className="lp-field">
+              <label className="lp-label" htmlFor="join-display-name">
+                Display name
+              </label>
+              <input
+                id="join-display-name"
+                className="lp-input lp-join-input"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                maxLength={40}
+                placeholder="Your name"
+                autoComplete="name"
+                autoFocus
+              />
+            </div>
+            <div className="lp-field">
+              <label className="lp-label" htmlFor="join-room-password">
+                Room password
+              </label>
+              <input
+                id="join-room-password"
+                className="lp-input lp-join-input"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="XXXX-XXXX-XXXX-XXXX"
+                autoComplete="current-password"
+              />
+            </div>
+            {error && (
+              <div className="lp-error lp-join-error" role="alert">
+                {error}
+              </div>
+            )}
+            <div className="lp-box-foot lp-join-actions">
+              <Link className="lp-btn is-bare" to="/">
+                Wrong room?
+              </Link>
+              <button
+                type="submit"
+                className="lp-btn"
+                disabled={busy || !password || !displayName.trim()}
+              >
+                {busy ? "Joining…" : "Join the room"}
+              </button>
+            </div>
+          </form>
+
+          <p className="lp-hint lp-rise d5">No account needed. The room expires on its own.</p>
+        </main>
+      </div>
     </div>
   );
 }

@@ -572,6 +572,63 @@
    The box border (.lp-box:focus-within) already signals focus — skip the ring. */
 .lp-box-input:focus-visible { outline: none; }
 
+/* ---------- Room invite gate ---------- */
+.lp-join-page { min-height: 100%; }
+.lp-join-page-inner {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+.lp-room-code {
+  padding: 8px 12px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: rgba(255, 253, 249, 0.55);
+  font-family: "Courier Prime", ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--ink-soft);
+}
+.lp-join-main {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 64px 24px 88px;
+  text-align: center;
+}
+.lp-join-main .lp-eyebrow { margin: 0 0 22px; }
+.lp-join-title {
+  margin: 0 0 16px;
+  font-size: clamp(42px, 6vw, 72px);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.045em;
+}
+.lp-join-main > .lp-sub { margin-bottom: 32px; }
+.lp-join-box { width: min(520px, calc(100vw - 48px)); padding: 24px; }
+.lp-join-box .lp-field { text-align: left; }
+.lp-join-input {
+  width: 100%;
+  margin-top: 8px;
+  letter-spacing: 0;
+}
+.lp-join-error { padding: 0 0 14px; text-align: left; }
+.lp-join-actions { margin-top: 20px; }
+
+@media (max-width: 560px) {
+  .lp-top { padding: 16px 18px; }
+  .lp-join-main { justify-content: flex-start; padding: 56px 18px 64px; }
+  .lp-join-title { font-size: 42px; }
+  .lp-join-box { width: calc(100vw - 36px); padding: 20px; }
+  .lp-join-actions { align-items: stretch; flex-direction: column-reverse; }
+  .lp-join-actions .lp-btn { width: 100%; }
+}
+
 /* ---------- Join-by-code row ---------- */
 .lp-join {
   display: flex;
