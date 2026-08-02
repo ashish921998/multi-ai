@@ -16,6 +16,7 @@ import {
   buildConnectorCommand,
   parseCustomArguments,
 } from "../lib/connectorCommand.ts";
+import { errorMessage } from "../lib/errors.ts";
 import "./landing.css";
 
 type RoomMessage = RoomState["messages"][number];
@@ -68,7 +69,7 @@ function JoinGate(props: { roomId: string; onJoined: (s: RoomSession) => void })
       sessionStore.put(session);
       props.onJoined(session);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not join the room.");
+      setError(errorMessage(e, "Could not join the room."));
     } finally {
       setBusy(false);
     }
@@ -259,7 +260,7 @@ function RoomView(props: {
                 const c = await requestConnectCode();
                 if (c) setConnectModal(c as ConnectCodeResult);
               } catch (e) {
-                alert(e instanceof Error ? e.message : "Could not issue a code.");
+                alert(errorMessage(e, "Could not issue a code."));
               }
             }}
           >
@@ -385,7 +386,7 @@ function Composer(props: {
           ? { id: uploaded.id, url: URL.createObjectURL(resized.blob) }
           : null;
       } catch (error) {
-        alert(error instanceof Error ? error.message : "Could not attach the screenshot.");
+        alert(errorMessage(error, "Could not attach the screenshot."));
         return null;
       }
     }));
@@ -412,7 +413,7 @@ function Composer(props: {
       pending.forEach((p) => URL.revokeObjectURL(p.url));
       setPending([]);
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Could not send the message.");
+      alert(errorMessage(e, "Could not send the message."));
     } finally {
       setBusy(false);
     }
