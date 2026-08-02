@@ -3,7 +3,7 @@
  *
  * Drives the real connector CLI binary through the full agent lifecycle:
  *   create room → join → issue connect code → spawn `room connect`
- *   → post message → send handoff → verify EchoResponder streams into timeline
+ *   → post message → send handoff → verify a custom stdin echo harness streams into timeline
  *   → SIGTERM → verify clean disconnect.
  *
  * Run: npx tsx e2e-live.mts
@@ -68,12 +68,25 @@ async function main() {
 
   // 5. Spawn the REAL connector binary. Run tsx from the connector's own
   //    node_modules so the child does not depend on a global PATH entry.
-  const tsxPath = `${process.cwd()}/apps/connector/node_modules/.bin/tsx`;
-  const child = spawn("npx", [tsxPath, "apps/connector/src/cli.ts", "connect", room.roomId, code.connectionCode], {
+  const tsxCli = `${process.cwd()}/apps/connector/node_modules/tsx/dist/cli.mjs`;
+  const child = spawn(process.execPath, [
+    tsxCli,
+    "apps/connector/src/cli.ts",
+    "connect",
+    room.roomId,
+    code.connectionCode,
+    "--agent",
+    "custom",
+    "--command",
+    process.execPath,
+    "--arg=-e",
+    "--arg=process.stdin.pipe(process.stdout)",
+  ], {
     env: {
       ...process.env,
       CONVEX_URL,
-      PATH: `${process.cwd()}/apps/connector/node_modules/.bin:${process.env.PATH ?? ""}`,
+      ROOM_AGENT_COMMAND: "",
+      ROOM_AGENT_ARGS: "",
     },
     stdio: ["inherit", "pipe", "pipe"],
   });
@@ -114,11 +127,8 @@ async function main() {
     log(`Agent message status: ${agentMsg.status}`);
     if (agentMsg.status !== "complete") throw new Error(`Agent message did not complete (status=${agentMsg.status}).`);
 
-    const echoOk = agentMsg.text.includes("Echo responder");
     const bodyOk = agentMsg.text.includes(MESSAGE_TEXT);
-    log(`EchoResponder text present: ${echoOk}`);
-    log(`Participant message echoed back: ${bodyOk}`);
-    if (!echoOk) throw new Error("Agent response missing EchoResponder marker.");
+    log(`Participant message reached the custom harness: ${bodyOk}`);
     if (!bodyOk) throw new Error("Agent response did not include the original participant message.");
 
     // Verify handoff is no longer in flight.

@@ -14,13 +14,13 @@ interface CreateRoomResult {
 
 const NOTES = [
   "no accounts, just a link",
-  "your Pi never leaves your laptop",
+  "your agent stays on your laptop",
   "the room expires on its own",
 ];
 
 // Plain ASCII, not box-drawing glyphs — those aren't reliably monospaced and
 // shear the column alignment.
-const DIAGRAM = `your team  -->  room  <--  pi (localhost)
+const DIAGRAM = `your team  -->  room  <--  agent (localhost)
                  |
               the plan`;
 
@@ -142,7 +142,7 @@ function Scene() {
         the cart bug is the real blocker
       </div>
       <div className="lp-card lp-card-4">
-        <span className="lp-card-who is-pi">pi · localhost</span>
+        <span className="lp-card-who is-pi">agent · localhost</span>
         drafting plan
         <span className="lp-dots">
           <span>.</span>
@@ -155,7 +155,7 @@ function Scene() {
 }
 
 /* A miniature room replaying a session: three humans argue, the thread is
-   handed to Pi, the plan streams in. Loops forever. */
+   handed to an agent, and the plan streams in. */
 function Demo() {
   const step = useDemoStep();
   const on = (i: number) => (step >= i ? " is-on" : "");
@@ -164,7 +164,7 @@ function Demo() {
       <div className="lp-demo-bar">
         <span className="lp-demo-live" />
         <span className="lp-demo-code">ROOM K7Q9FXM2PW</span>
-        <span className="lp-demo-meta">3 people · 1 pi</span>
+        <span className="lp-demo-meta">3 people · 1 agent</span>
       </div>
       <div className="lp-demo-body">
         <div className={"lp-demo-row" + on(0)}>
@@ -181,10 +181,10 @@ function Demo() {
           <span className="lp-card-who">sam</span>
           <p>cart state resets on back-nav — that's the real bug</p>
         </div>
-        <div className={"lp-demo-hand" + on(3)}>· · · handed to pi · · ·</div>
+        <div className={"lp-demo-hand" + on(3)}>· · · handed to agent · · ·</div>
         <div className={"lp-demo-pi" + on(4)}>
           <span className="lp-card-who is-pi">
-            {step >= 7 ? "pi · plan, v1" : "pi · drafting"}
+            {step >= 7 ? "agent · plan, v1" : "agent · drafting"}
             {step < 7 && (
               <span className="lp-dots">
                 <span>.</span>
@@ -333,8 +333,8 @@ export function Landing() {
                   ?
                 </h1>
                 <p className="lp-sub lp-rise d3">
-                  Get the team and one local Pi agent in the same room. Argue it out, paste
-                  screenshots, hand it over — leave with a plan your agent already understands.
+                  Get the team and one local coding agent in the same room. Argue it out, paste
+                  screenshots, hand it over—leave with a plan your agent already understands.
                 </p>
 
                 <div className="lp-box lp-rise d4">
@@ -435,11 +435,11 @@ export function Landing() {
                 <p className="lp-body">
                   Nobody writes the requirements doc — the room is the requirements doc. Messages,
                   screenshots, and pushback pile up in one thread, and when it's ripe, you hand
-                  the whole thing to Pi in one click.
+                  the discussion to your agent in one click.
                 </p>
                 <p className="lp-body">
-                  Pi reads everything — every message, every screenshot — and answers with a plan,
-                  streamed back into the room where everyone can tear it apart.
+                  Your agent reads every message—and, when it supports vision, the screenshots—and
+                  answers with a plan, streamed back into the room where everyone can tear it apart.
                 </p>
               </div>
               <div className="lp-reveal d2">
@@ -463,28 +463,28 @@ export function Landing() {
               <div className="lp-how-card lp-reveal d2">
                 <span className="lp-how-num">02</span>
                 <h3>Argue it out</h3>
-                <p>Messages, screenshots, pushback. Don't tidy it — the mess is the point, and Pi
-                reads all of it.</p>
+                <p>Messages, screenshots, pushback. Don't tidy it—the mess is the point. Your agent
+                reads every message and, with vision support, the screenshots.</p>
               </div>
               <div className="lp-how-card lp-reveal d3">
                 <span className="lp-how-num">03</span>
-                <h3>Hand it to Pi</h3>
-                <p>One click hands the thread to the Pi agent on your laptop. It streams the plan
+                <h3>Hand it to your agent</h3>
+                <p>One click hands the thread to Codex, Claude Code, Cursor, OpenCode, or Pi. It streams the plan
                 back for everyone to attack.</p>
               </div>
             </div>
 
             <div className="lp-term lp-reveal" aria-hidden="true">
               <div className="lp-term-line">
-                <b>$</b> room connect K7Q9 FXM2
+                <b>$</b> room connect K7Q9 FXM2 --agent codex
               </div>
-              <div className="lp-term-line is-ok">✓ connected — pi joined the room</div>
+              <div className="lp-term-line is-ok">✓ connected — agent joined the room</div>
               <div className="lp-term-line is-ok">
                 ✓ code stays on this laptop<span className="lp-caret" />
               </div>
             </div>
             <p className="lp-hint lp-center lp-reveal">
-              Pi connects <em>outward</em> from your machine. No tunnels, no hosted repos, nothing
+              The connector reaches <em>outward</em> from your machine. No tunnels, no hosted repos, nothing
               to revoke later.
             </p>
           </section>

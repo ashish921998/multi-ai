@@ -29,12 +29,19 @@ const asConnId = (id: string): Id<"agentConnections"> => id as Id<"agentConnecti
 
 export class ConvexRoomAgentClient implements RoomAgentClient {
   #client: ConvexClient | null = null;
+  #closing: Promise<void> | null = null;
   #agentConnectionId: string | null = null;
 
+  constructor(
+    private readonly createClient: (url: string) => ConvexClient = (url) => new ConvexClient(url),
+    private readonly convexUrl = CONVEX_URL,
+  ) {}
+
   private client(): ConvexClient {
+    if (this.#closing) throw new Error("Convex client is closed.");
     if (!this.#client) {
-      if (!CONVEX_URL) throw new Error("CONVEX_URL env var is not set.");
-      this.#client = new ConvexClient(CONVEX_URL);
+      if (!this.convexUrl) throw new Error("CONVEX_URL env var is not set.");
+      this.#client = this.createClient(this.convexUrl);
     }
     return this.#client;
   }
@@ -109,9 +116,30 @@ export class ConvexRoomAgentClient implements RoomAgentClient {
   }
 
   async disconnect(agentConnectionId: string): Promise<void> {
-    await this.client().mutation(api.agent.disconnect, {
-      agentConnectionId: asConnId(agentConnectionId),
-    });
+    let disconnectFailed = false;
+    let disconnectError: unknown;
+    try {
+      await this.client().mutation(api.agent.disconnect, {
+        agentConnectionId: asConnId(agentConnectionId),
+      });
+    } catch (error) {
+      disconnectFailed = true;
+      disconnectError = error;
+    }
+
+    this.#agentConnectionId = null;
+    try {
+      await this.close();
+    } catch (closeError) {
+      if (disconnectFailed) {
+        throw new AggregateError(
+          [disconnectError, closeError],
+          "Agent disconnect and Convex client close both failed.",
+        );
+      }
+      throw closeError;
+    }
+    if (disconnectFailed) throw disconnectError;
   }
 
   async writeDocument(
@@ -123,14 +151,14 @@ export class ConvexRoomAgentClient implements RoomAgentClient {
   ): Promise<number> {
     if (!base) {
       // `documents.create` checks the indexed room/path pair transactionally. If
-      // another collaborator created the path after Pi's snapshot, this fails
+      // another collaborator created the path after the agent's snapshot, this fails
       // rather than replacing their document.
       const created = await this.client().mutation(api.documents.create, {
         roomId,
         agentConnectionId: asConnId(agentConnectionId),
         path,
         body,
-        summary: "Pi created the plan",
+        summary: "Agent created the plan",
       });
       return created.version;
     }
@@ -144,7 +172,7 @@ export class ConvexRoomAgentClient implements RoomAgentClient {
       documentId: base.id as Id<"documents">,
       body,
       expectedVersion: base.version,
-      summary: "Pi updated the plan",
+      summary: "Agent updated the plan",
     });
     return updated.version;
   }
@@ -164,6 +192,11 @@ export class ConvexRoomAgentClient implements RoomAgentClient {
 
   /** Closes the underlying WebSocket. Call on shutdown. */
   async close(): Promise<void> {
-    await this.#client?.close();
+    if (!this.#closing) {
+      const client = this.#client;
+      this.#client = null;
+      this.#closing = Promise.resolve().then(() => client?.close());
+    }
+    await this.#closing;
   }
 }

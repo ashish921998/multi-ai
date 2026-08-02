@@ -1,11 +1,11 @@
 # Multi-AI Planning Room
 
-A temporary space where a team and **one local Pi agent** turn a discussion into a plan.
+A temporary space where a team and **one local coding agent** turn a discussion into a plan.
 
-People join a room with a link + password, discuss a coding requirement with text and
-screenshots, and hand the new discussion to a local Pi agent that responds as a
-planning-focused coding agent. **No accounts, no tunnels, no hosted repositories** —
-Pi stays local on the participant's laptop and connects *outward* to a cloud relay.
+People join a room with a link and password, discuss a coding requirement with text and
+screenshots, and hand the new discussion to Codex, Claude Code, Cursor, OpenCode, Pi, or
+a custom local command. **No accounts, no tunnels, no hosted repositories**—the agent
+stays on the participant's laptop and connects outward to a cloud relay.
 
 > Implements the spec in [`docs/v1-room-backend-handoff.md`](./docs/v1-room-backend-handoff.md)
 > and the closed design decisions in [`issues/`](./issues/) (0001–0010).
@@ -17,13 +17,13 @@ Pi stays local on the participant's laptop and connects *outward* to a cloud rel
 | 🌐 Web app | <https://multi-ai-egg.pages.dev> |
 | ⚙️ Backend | `https://nautical-ermine-841.convex.cloud` (Convex) |
 
-Open the web app → **Create room** → share the link + password → connect Pi with the
-command shown under *Connect a Pi*.
+Open the web app → **Create room** → share the link and password → choose a harness
+under **Connect an agent** and run the generated command.
 
 ## Architecture
 
-```
-Browsers ──reactive query──▶ Convex cloud ◀──outbound── Pi connector (local laptop)
+```text
+Browsers ──reactive query──▶ Convex cloud ◀──outbound── agent connector (local laptop)
                                   │
                      documents · file storage · functions · cron
 ```
@@ -45,22 +45,22 @@ Browsers ──reactive query──▶ Convex cloud ◀──outbound── Pi c
     references); `_generated/` is produced by `npx convex dev`.
 - **`apps/web`** — the browser app (Vite + React), deployed to Cloudflare Pages.
   Landing (create) → Join gate → collaborative workspace room. Participants and
-  Pi create and edit the same versioned Markdown/HTML documents with optimistic
+  the connected agent edit the same versioned Markdown/HTML documents with optimistic
   concurrency, history, compare, and restore. **One reactive
   `useQuery(api.rooms.state)` subscription drives the room summary** — no polling;
   the selected document body and history are loaded lazily.
 - **`apps/connector`** — the local `room` CLI. Connects with a one-time code, becomes
   the active agent, heartbeats the lease, **reactively subscribes to
   `agent.pendingHandoff`**, and streams the response back into the room timeline.
-  It gives Pi the current `plan.md` and writes only against the version Pi read,
+  It gives the agent the current `plan.md` and writes only against the version it read,
   so a concurrent participant edit is never silently overwritten.
 
-```
+```text
 .
 ├── packages/shared/   # runtime-agnostic contract (DO NOT depend on Convex here)
 ├── convex/            # backend: schema, functions, lib helpers, tests
 ├── apps/web/          # Vite + React SPA → Cloudflare Pages
-├── apps/connector/    # `room` CLI → your local Pi
+├── apps/connector/    # `room` CLI → Pi / Codex / Claude / Cursor / OpenCode / custom
 └── docs/, issues/     # spec + closed design decisions
 ```
 
@@ -68,7 +68,7 @@ Browsers ──reactive query──▶ Convex cloud ◀──outbound── Pi c
 
 ```sh
 pnpm install
-pnpm test          # 116 tests across shared / web / connector / convex
+pnpm test          # tests across shared / web / connector / convex
 pnpm typecheck     # tsc --noEmit for every workspace + the convex backend
 ```
 
@@ -88,23 +88,46 @@ cp apps/web/.env.example apps/web/.env.local   # set VITE_CONVEX_URL
 pnpm --filter @multi-ai/web dev
 ```
 
-### 3. Local Pi connector
+### 3. Local agent connector
 
-In the room UI, choose **Connect a Pi** and run the displayed command. Point
-`ROOM_AGENT_COMMAND` at your agent (it reads the handoff envelope on stdin and writes
-a plan to stdout):
+In the room UI, choose **Connect an agent**, select the harness, and run the displayed
+command beside the repository:
 
 ```sh
 CONVEX_URL=https://your-deployment.convex.cloud \
-ROOM_AGENT_COMMAND='pi' \                       # default: an echo responder for smoke tests
-ROOM_AGENT_SUPPORTS_VISION=false \              # true if the model reads images
-pnpm --filter @multi-ai/connector dev connect ROOM1234 ABCD-2345
+pnpm --filter @multi-ai/connector dev connect ROOM1234 ABCD-2345 --agent codex
 ```
 
-The connector stays connected and reactive — it picks up handoffs the instant a
-participant sends them. After each response it updates `plan.md` only if the
-version Pi read is still current; conflicts leave the participant's edit intact
-and keep the streamed response in the discussion timeline.
+Built-in harness names are `pi`, `codex`, `claude`, `cursor`, and `opencode`. Each uses
+the harness's non-interactive plain-text mode and receives the room prompt on stdin; Codex
+and Claude Code run in their read-only planning modes, and Cursor runs sandboxed. To
+integrate another executable, pass fixed arguments separately:
+
+```sh
+CONVEX_URL=https://your-deployment.convex.cloud \
+pnpm --filter @multi-ai/connector dev connect ROOM1234 ABCD-2345 \
+  --agent custom --command ./my-agent --arg run --arg=--plain
+```
+
+The legacy `ROOM_AGENT_COMMAND` setting is a literal executable path, not a shell
+command; put its arguments in `ROOM_AGENT_ARGS` as a JSON string array.
+
+The connector terminates descendants in the custom harness's process tree/group when
+the harness exits or the connector stops. Do not launch intentionally persistent
+helpers: development servers, language servers, and similar child processes will also
+be terminated. A process that deliberately detaches into a separate OS session may
+escape cleanup; the connector stops waiting on its inherited stdout after the harness
+exits, and custom harnesses should not detach persistent processes.
+
+On SIGINT/SIGTERM, the connector gives an active handoff up to 5 seconds to record its
+final status, then gives disconnect the same bounded wait. Configure this shutdown-only
+bound with `--shutdown-drain-timeout-ms=<milliseconds>` or
+`ROOM_AGENT_SHUTDOWN_DRAIN_TIMEOUT_MS`; it does not limit normal harness runtime.
+
+Add `--supports-vision` when the selected model can read the temporary image paths in
+the handoff. The connector stays reactive and updates `plan.md` only if the version
+the agent read is still current. Conflicts preserve the participant's edit and keep
+the streamed response in the discussion timeline.
 
 ## Deploy
 

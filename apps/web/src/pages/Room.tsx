@@ -1,12 +1,21 @@
 import { useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useMutation } from "convex/react";
+import {
+  BUILT_IN_AGENT_HARNESSES,
+  isHarnessName,
+  type HarnessName,
+} from "@multi-ai/shared";
 import { api } from "../../../../convex/api";
 import type { RoomState } from "../../../../convex/rooms";
 import { sessionStore, type RoomSession } from "../session.ts";
 import { useRoom } from "../useRoom.ts";
 import { DocumentWorkspace } from "../components/DocumentWorkspace.tsx";
 import { ScreenshotImg } from "../components/ScreenshotImg.tsx";
+import {
+  buildConnectorCommand,
+  parseCustomArguments,
+} from "../lib/connectorCommand.ts";
 
 type RoomMessage = RoomState["messages"][number];
 type RoomParticipant = RoomState["participants"][number];
@@ -193,9 +202,9 @@ function RoomView(props: {
           <div className="divider" />
           <span className="kicker muted">ACTIVE AGENT</span>
           <div className="agent-card">
-            <div className="agent-icon">π</div>
+            <div className="agent-icon">AI</div>
             <div>
-              <div className="title">{data.agent.active ? "Pi connected" : "No Pi connected"}</div>
+              <div className="title">{data.agent.active ? "Agent connected" : "No agent connected"}</div>
               <div className={"status" + (data.agent.active ? "" : " idle")}>
                 {data.agent.active
                   ? handoffInProgress
@@ -217,7 +226,7 @@ function RoomView(props: {
               }
             }}
           >
-            Connect a Pi
+            Connect an agent
           </button>
         </aside>
 
@@ -289,17 +298,17 @@ function Message(props: {
   sessionToken: string;
 }) {
   const isAgent = props.m.authorKind === "agent";
-  const name = isAgent ? "Pi" : authorName(props.m, props.me, props.nameMap);
+  const name = isAgent ? "Agent" : authorName(props.m, props.me, props.nameMap);
   return (
     <article className={"message" + (isAgent ? " agent" : "")}>
-      <span className="avatar">{isAgent ? "π" : initials(name)}</span>
+      <span className="avatar">{isAgent ? "AI" : initials(name)}</span>
       <div className="body">
         <div className="head">
           <span className="name">{name}</span>
           <span className="time">{clock(props.m.createdAt)}</span>
         </div>
         <div className={"text" + (isAgent && props.m.status === "streaming" ? " streaming-cursor" : "")}>
-          {props.m.text || (isAgent && props.m.status === "streaming" ? "Pi is responding…" : "")}
+          {props.m.text || (isAgent && props.m.status === "streaming" ? "The agent is responding…" : "")}
         </div>
         {props.m.screenshots.length > 0 && (
           <div className="shots">
@@ -421,21 +430,101 @@ function Composer(props: {
   );
 }
 
+type HarnessChoice = HarnessName | "custom";
+
 function ConnectModal(props: { info: ConnectCodeResult; onClose: () => void }) {
+  const [harness, setHarness] = useState<HarnessChoice>("codex");
+  const [customExecutable, setCustomExecutable] = useState("");
+  const [customArgs, setCustomArgs] = useState("");
+  const [supportsVision, setSupportsVision] = useState(false);
+  const command = buildConnectorCommand(
+    props.info.command,
+    harness === "custom"
+      ? {
+          kind: "custom",
+          executable: customExecutable,
+          args: parseCustomArguments(customArgs),
+          supportsVision,
+        }
+      : { kind: "builtIn", name: harness, supportsVision },
+  );
+  const displayedCommand = command ?? `${props.info.command} --agent custom --command <executable>`;
+
   return (
     <div className="modal-backdrop" onClick={props.onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Connect your local Pi</h3>
+        <h3>Connect a local coding agent</h3>
         <p className="sub" style={{ color: "var(--muted)", marginTop: 4 }}>
-          Run this once on the machine that has Pi and your repository. Pi makes an outbound
-          connection — no port or tunnel needed.
+          Choose a harness and run the command beside your repository. The connector only makes
+          outbound connections—no port or tunnel needed.
         </p>
-        <div className="code-block">{props.info.command}</div>
+        <div className="field">
+          <label htmlFor="agent-harness">Agent harness</label>
+          <select
+            id="agent-harness"
+            className="input"
+            value={harness}
+            onChange={(event) => {
+              const selection = event.target.value;
+              if (selection === "custom" || isHarnessName(selection)) setHarness(selection);
+            }}
+          >
+            {BUILT_IN_AGENT_HARNESSES.map((agent) => (
+              <option key={agent.id} value={agent.id}>{agent.label}</option>
+            ))}
+            <option value="custom">Custom command</option>
+          </select>
+        </div>
+        {harness === "custom" && (
+          <>
+            <div className="field">
+              <label htmlFor="custom-agent-command">Executable</label>
+              <input
+                id="custom-agent-command"
+                className="input"
+                value={customExecutable}
+                onChange={(event) => setCustomExecutable(event.target.value)}
+                placeholder="./my-agent"
+              />
+              <span className="hint">
+                Use a command on PATH or an absolute/relative path. Shell expansions such as ~,
+                $HOME, and globs are not applied.
+              </span>
+            </div>
+            <div className="field">
+              <label htmlFor="custom-agent-args">Arguments (one per line)</label>
+              <textarea
+                id="custom-agent-args"
+                className="input"
+                value={customArgs}
+                onChange={(event) => setCustomArgs(event.target.value)}
+                placeholder={"run\n--plain"}
+                rows={3}
+              />
+            </div>
+          </>
+        )}
+        <div className="field">
+          <label htmlFor="agent-supports-vision">Screenshot support</label>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 400 }}>
+            <input
+              id="agent-supports-vision"
+              type="checkbox"
+              checked={supportsVision}
+              onChange={(event) => setSupportsVision(event.target.checked)}
+            />
+            This agent and model can read local image files
+          </label>
+        </div>
+        <div className="code-block">{displayedCommand}</div>
         <p className="hint">One-time code: {props.info.connectionCode}</p>
         <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
           <button type="button"
             className="btn secondary"
-            onClick={() => navigator.clipboard?.writeText(props.info.command)}
+            disabled={!command}
+            onClick={() => {
+              if (command) void navigator.clipboard?.writeText(command);
+            }}
           >
             Copy command
           </button>
@@ -463,7 +552,7 @@ function visionWarning(data: RoomState): string | null {
   if (!data.agent.active || data.agent.supportsVision) return null;
   const hasShots = data.messages.some((m) => m.screenshots.length > 0);
   if (!hasShots) return null;
-  return "The connected Pi model does not receive images, so screenshots are shared with the room but not with Pi.";
+  return "The connected agent does not receive images, so screenshots stay visible in the room but are omitted from its handoff.";
 }
 
 function initials(name: string): string {

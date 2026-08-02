@@ -1,21 +1,18 @@
 /**
  * Agent responders turn a handoff envelope into a streamed response.
  *
- * The default `CommandResponder` shells out to a local command (configured via
- * the `ROOM_AGENT_COMMAND` env var). It feeds the deterministic handoff envelope
- * to the command's stdin and streams its stdout back to the room as the Pi
- * response. Point this at `pi` (or any agent that reads a prompt from stdin and
- * writes a plan to stdout) so the repository, credentials, and API keys stay on
- * the participant's own laptop.
+ * `HarnessResponder` delegates one prompt to a local coding-agent harness and
+ * streams its plain-text stdout back to the room. Every harness receives the
+ * prompt on stdin, and the connector never uses a shell, so room content stays
+ * out of process arguments and cannot become shell syntax.
  *
- * Vision (issue 0005, review #2): when a handoff carries screenshots, each one
- * is downloaded from its short-lived signed URL to a temp file and the file
- * paths are appended to the stdin prompt as an attachment manifest. A
- * vision-capable command (ROOM_AGENT_SUPPORTS_VISION=true) can then read those
- * images directly from disk; the bytes never have to round-trip through stdin.
+ * Screenshots are downloaded to short-lived local files and listed in the
+ * prompt. The harness can read those files without moving repository access or
+ * provider credentials off the participant's laptop.
  */
 
-import { spawn } from "node:child_process";
+import spawn from "cross-spawn";
+import treeKill from "tree-kill";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -24,6 +21,7 @@ import type {
   PendingHandoff,
   WorkspaceDocumentSnapshot,
 } from "./connector.ts";
+import type { AgentHarness } from "./harnesses.ts";
 
 interface AttachmentFile {
   /** Absolute path the agent command can open(). */
@@ -33,27 +31,21 @@ interface AttachmentFile {
   height?: number;
 }
 
-export class CommandResponder implements AgentResponder {
-  constructor(private command: string) {}
+export class HarnessResponder implements AgentResponder {
+  constructor(private harness: AgentHarness) {}
 
   async *stream(handoff: PendingHandoff, signal: AbortSignal): AsyncIterable<string> {
+    throwIfStopped(signal, this.harness.name);
     const attachments = await materializeScreenshots(handoff.screenshots ?? [], signal);
-    const stdin = composeStdin(
-      handoff.body ?? "",
-      attachments,
-      handoff.workspaceDocument ?? null,
-    );
-
-    const child = spawn(this.command, { shell: true, stdio: ["pipe", "pipe", "inherit"] });
-
-    signal.addEventListener("abort", () => {
-      child.kill("SIGTERM");
-    });
-
-    child.stdin.end(stdin);
 
     try {
-      yield* iterateStdout(child.stdout);
+      throwIfStopped(signal, this.harness.name);
+      const prompt = composePrompt(
+        handoff.body ?? "",
+        attachments,
+        handoff.workspaceDocument ?? null,
+      );
+      yield* runHarness(this.harness, prompt, signal);
     } finally {
       if (attachments.dir) {
         await rm(attachments.dir, { recursive: true, force: true }).catch(() => {});
@@ -62,12 +54,120 @@ export class CommandResponder implements AgentResponder {
   }
 }
 
+type ProcessOutcome =
+  | { exitCode: number }
+  | { signal: NodeJS.Signals }
+  | { error: Error };
+
+async function* runHarness(
+  harness: AgentHarness,
+  prompt: string,
+  signal: AbortSignal,
+): AsyncIterable<string> {
+  throwIfStopped(signal, harness.name);
+  const child = spawn(harness.executable, harness.args, {
+    stdio: ["pipe", "pipe", "inherit"],
+    detached: process.platform !== "win32",
+  });
+  const { stdin, stdout } = child;
+  if (!stdin || !stdout) {
+    child.kill();
+    throw new Error(`Could not open stdio pipes for ${harness.name}.`);
+  }
+  let stdinError: NodeJS.ErrnoException | undefined;
+  stdin.once("error", (error: NodeJS.ErrnoException) => {
+    stdinError = error;
+  });
+
+  const signalProcessTree = async (signalName: NodeJS.Signals): Promise<void> => {
+    const pid = child.pid;
+    if (!pid) {
+      child.kill(signalName);
+      return;
+    }
+    if (process.platform === "win32") {
+      await new Promise<void>((resolve) => {
+        treeKill(pid, signalName, () => resolve());
+      });
+      return;
+    }
+    try {
+      process.kill(-pid, signalName);
+    } catch {
+      child.kill(signalName);
+    }
+  };
+  let stdoutCleanupTimer: ReturnType<typeof setTimeout> | undefined;
+  let stdoutForcedClosed = false;
+  const completion = new Promise<ProcessOutcome>((resolve) => {
+    child.once("error", (error) => resolve({ error }));
+    child.once("exit", (code, signal) => {
+      if (code !== null) resolve({ exitCode: code });
+      else if (signal) resolve({ signal });
+      else resolve({ exitCode: 1 });
+      // A descendant may still hold the inherited stdout pipe open after the
+      // harness exits. End the process group, then stop waiting on the pipe if
+      // a deliberately detached descendant escaped that group.
+      void signalProcessTree("SIGKILL");
+      stdoutCleanupTimer = setTimeout(() => {
+        stdoutForcedClosed = true;
+        stdout.destroy();
+      }, 250);
+    });
+  });
+
+  let stopping = false;
+  let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
+  const stopChild = () => {
+    if (stopping) return;
+    stopping = true;
+    void signalProcessTree("SIGTERM");
+    forceKillTimer = setTimeout(() => void signalProcessTree("SIGKILL"), 1_000);
+    forceKillTimer.unref();
+  };
+
+  signal.addEventListener("abort", stopChild, { once: true });
+  if (signal.aborted) stopChild();
+  stdin.end(prompt);
+
+  try {
+    try {
+      yield* iterateStdout(stdout);
+    } catch (error) {
+      if (!stdoutForcedClosed) throw error;
+    }
+    const outcome = await completion;
+    if (signal.aborted) throw new Error(`${harness.name} was stopped.`);
+    if ("error" in outcome) throw outcome.error;
+    if ("signal" in outcome) {
+      throw new Error(`${harness.name} was terminated by signal ${outcome.signal}.`);
+    }
+    if (outcome.exitCode !== 0) {
+      throw new Error(`${harness.name} exited with code ${outcome.exitCode}.`);
+    }
+    if (stdinError && stdinError.code !== "EPIPE") throw stdinError;
+  } finally {
+    signal.removeEventListener("abort", stopChild);
+    if (child.exitCode === null && child.signalCode === null) stopChild();
+    await completion;
+    if (forceKillTimer) clearTimeout(forceKillTimer);
+    if (stdoutCleanupTimer) clearTimeout(stdoutCleanupTimer);
+    await signalProcessTree("SIGKILL");
+  }
+}
+
+function throwIfStopped(signal: AbortSignal, harnessName: string): void {
+  if (signal.aborted) throw new Error(`${harnessName} was stopped.`);
+}
+
 async function* iterateStdout(stdout: NodeJS.ReadableStream): AsyncIterable<string> {
   const decoder = new TextDecoder();
   for await (const chunk of stdout as AsyncIterable<Buffer>) {
-    yield decoder.decode(chunk, { stream: true });
+    const text = decoder.decode(chunk, { stream: true });
+    if (text) yield text;
   }
-  yield decoder.decode();
+  const tail = decoder.decode();
+  if (tail) yield tail;
 }
 
 /**
@@ -109,12 +209,12 @@ export async function materializeScreenshots(
 }
 
 /**
- * Builds the command prompt from the new discussion, the exact plan version Pi
- * will update, and any downloaded attachments. Supplying `null` explicitly
+ * Builds the harness prompt from the new discussion, the exact plan version the
+ * agent will update, and any downloaded attachments. Supplying `null` explicitly
  * means plan.md does not exist yet; omitting the argument preserves the old
  * envelope-only helper behavior used by callers outside the room connector.
  */
-export function composeStdin(
+export function composePrompt(
   body: string,
   attachments: { files: AttachmentFile[] },
   workspaceDocument?: WorkspaceDocumentSnapshot | null,
@@ -150,15 +250,5 @@ function mimeToExt(mime: string): string {
       return ".bmp";
     default:
       return ".img";
-  }
-}
-
-/** A responder that deterministically builds on plan.md for local smoke tests. */
-export class EchoResponder implements AgentResponder {
-  async *stream(handoff: PendingHandoff): AsyncIterable<string> {
-    const current = handoff.workspaceDocument?.body.trim() || "# Plan";
-    yield `${current}\n\n## Latest handoff\n\n`;
-    yield `Echo responder received ${handoff.includedSeqs?.length ?? 0} new message(s).\n\n`;
-    yield handoff.body ?? "";
   }
 }

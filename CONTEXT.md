@@ -13,11 +13,11 @@ A person who has joined a room and can read, contribute messages, and share scre
 _Avoid_: User account, member, host
 
 **Agent connection**:
-A participant's live connection between the room and their local Pi coding agent.
+A participant's live connection between the room and their local coding-agent harness.
 _Avoid_: Host agent, owner agent
 
 **Active agent**:
-The one connected Pi agent currently eligible to receive a room handoff. A room has at most one active agent at a time.
+The one connected coding agent currently eligible to receive a room handoff. A room has at most one active agent at a time.
 _Avoid_: Primary agent, room owner
 
 **Handoff**:

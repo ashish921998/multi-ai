@@ -3,11 +3,11 @@
  *
  * Vocabulary comes from the project glossary (CONTEXT.md) and the closed
  * design decisions (issues 0001–0010). These types are imported by the
- * browser app, the local Pi connector, and the Supabase Edge Functions so
+ * browser app, the local agent connector, and backend functions so
  * every layer agrees on the shape of a room, message, handoff, and lease.
  */
 
-/** A message author is either a human participant or the active Pi agent. */
+/** A message author is either a human participant or the active coding agent. */
 export type MessageAuthor =
   | { kind: "participant"; participantId: string; displayName: string }
   | { kind: "agent"; agentConnectionId: string };
@@ -48,7 +48,7 @@ export interface RoomMessage {
 
 /**
  * A handoff is the deterministic batch of new messages since the previous
- * handoff boundary, packaged as one user-message envelope for the active Pi.
+ * handoff boundary, packaged as one user-message envelope for the active agent.
  * See issue 0003 (Room-to-Agent Handoff).
  */
 export interface Handoff {
@@ -66,15 +66,15 @@ export interface Handoff {
 
 export type HandoffStatus =
   | "pending" // built, waiting to be delivered
-  | "delivered" // Pi acknowledged receipt, boundary advanced
-  | "responding" // Pi response streaming into the timeline
+  | "delivered" // agent acknowledged receipt, boundary advanced
+  | "responding" // agent response streaming into the timeline
   | "complete" // response finished
   | "failed"; // delivery or response failed; retryable with the same batch
 
 /**
  * An agent connection is a participant's live link between the room and their
- * local Pi. At most one connection per room holds the active lease.
- * See issues 0002 (Pi Connector Lifecycle) and 0006 (Single Active Agent Takeover).
+ * local coding-agent harness. At most one connection per room holds the active lease.
+ * See issues 0002 (Connector Lifecycle) and 0006 (Single Active Agent Takeover).
  */
 export interface AgentConnection {
   id: string;
@@ -148,13 +148,13 @@ export interface RateConsumeResult {
   remaining: number;
 }
 
-/** The envelope handed to Pi as a single deterministic user message (issue 0003). */
+/** The envelope handed to the agent as one deterministic user message (issue 0003). */
 export interface HandoffEnvelope {
   /** Stable, human + agent readable markdown body. Deterministic for a given batch. */
   body: string;
   /** Sequence numbers that were folded into the body, ascending. */
   includedSeqs: number[];
-  /** The boundary to advance to once Pi acknowledges the handoff. */
+  /** The boundary to advance to once the agent acknowledges the handoff. */
   nextBoundarySeq: number;
   /** Whether any included message carried a vision screenshot. */
   hasVisionContent: boolean;

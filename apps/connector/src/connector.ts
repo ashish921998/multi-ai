@@ -1,16 +1,16 @@
 /**
- * Local Pi connector — orchestrates the room agent protocol.
+ * Local agent connector—orchestrates the room agent protocol.
  *
- * The connector is the participant's outbound link between a room and their
- * local Pi session (issues 0002, 0003, 0006). It:
+ * The connector is the participant's outbound link between a room and a local
+ * coding-agent harness. It:
  *   1. connects with a one-time code and becomes the active agent,
  *   2. heartbeats on the lease interval to keep the slot,
  *   3. listens (and polls as a fallback) for handoffs,
- *   4. streams Pi's response back into the room timeline,
+ *   4. streams the agent's response back into the room timeline,
  *   5. disconnects cleanly on stop.
  *
  * The protocol client and the agent responder are injected, so this module is
- * fully unit-testable without a Convex deployment or a real Pi session.
+ * fully unit-testable without a Convex deployment or a real agent process.
  */
 
 export interface ConnectResult {
@@ -47,7 +47,7 @@ export interface PendingHandoff {
     width?: number;
     height?: number;
   }>;
-  /** The plan version Pi read before responding, used as the OCC write base. */
+  /** The plan version the agent read before responding, used as the OCC write base. */
   workspaceDocument?: WorkspaceDocumentSnapshot;
 }
 
@@ -68,8 +68,8 @@ export interface RoomAgentClient {
   heartbeat(agentConnectionId: string): Promise<void>;
   disconnect(agentConnectionId: string): Promise<void>;
   /**
-   * Writes a workspace document only if it is still at the snapshot Pi read.
-   * A null snapshot means Pi observed that the path did not exist. A concurrent
+   * Writes a workspace document only if it is still at the snapshot the agent read.
+   * A null snapshot means the agent observed that the path did not exist. A concurrent
    * human edit is a conflict, never an invitation to overwrite.
    */
   writeDocument(
@@ -85,7 +85,7 @@ export interface RoomAgentClient {
 
 /**
  * Turns a handoff envelope into a streamed response. The default implementation
- * shells out to a local command (e.g. `pi`); tests inject a fake.
+ * delegates to a local harness; tests inject a fake.
  */
 export interface AgentResponder {
   stream(envelope: PendingHandoff, signal: AbortSignal): AsyncIterable<string>;
@@ -103,6 +103,8 @@ export interface ConnectorDeps {
   connectionCode: string;
   supportsVision: boolean;
   pollIntervalMs: number;
+  /** Maximum time to finalize an active handoff after an explicit stop. */
+  shutdownDrainTimeoutMs: number;
   stopSignal: AbortSignal;
   log: (message: string) => void;
 }
@@ -119,12 +121,10 @@ export async function runConnector(deps: ConnectorDeps): Promise<void> {
   const agentConnectionId = result.agentConnectionId;
   log(`Connected to room ${result.roomId} as the active agent.`);
 
-  let inFlight = false;
+  let activeHandoff: Promise<void> | null = null;
   const disposers: Array<() => void> = [];
 
-  const handleHandoff = async () => {
-    if (inFlight || stopSignal.aborted) return;
-    inFlight = true;
+  const processHandoff = async () => {
     try {
       const handoff = await client.fetchHandoff(agentConnectionId);
       if (!handoff.pending || !handoff.handoffId) return;
@@ -174,9 +174,16 @@ export async function runConnector(deps: ConnectorDeps): Promise<void> {
       }
     } catch (err) {
       log(`Handoff error: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      inFlight = false;
     }
+  };
+
+  const handleHandoff = () => {
+    if (activeHandoff || stopSignal.aborted) return;
+    const task = processHandoff();
+    activeHandoff = task;
+    void task.finally(() => {
+      if (activeHandoff === task) activeHandoff = null;
+    });
   };
 
   disposers.push(scheduler.every(result.heartbeatIntervalMs, () => {
@@ -190,20 +197,47 @@ export async function runConnector(deps: ConnectorDeps): Promise<void> {
   }));
 
   return new Promise<void>((resolve) => {
-    const finish = () => {
+    const finish = async () => {
       for (const dispose of disposers) dispose();
-      client
-        .disconnect(agentConnectionId)
-        .catch((e) => log(`Disconnect failed: ${String(e)}`))
-        .finally(() => {
-          log("Disconnected.");
-          resolve();
+      const handoffAtStop = activeHandoff;
+      if (
+        handoffAtStop &&
+        !(await settlesWithin(handoffAtStop, deps.shutdownDrainTimeoutMs))
+      ) {
+        log(
+          `Handoff did not settle within ${deps.shutdownDrainTimeoutMs}ms; forcing disconnect.`,
+        );
+      }
+      let disconnectError: unknown;
+      const disconnectTask = Promise.resolve()
+        .then(() => client.disconnect(agentConnectionId))
+        .catch((error: unknown) => {
+          disconnectError = error;
         });
+      if (!(await settlesWithin(disconnectTask, deps.shutdownDrainTimeoutMs))) {
+        log(`Disconnect failed: timed out after ${deps.shutdownDrainTimeoutMs}ms.`);
+      } else if (disconnectError !== undefined) {
+        log(`Disconnect failed: ${String(disconnectError)}`);
+      }
+      log("Disconnected.");
+      resolve();
     };
     if (stopSignal.aborted) {
-      finish();
+      void finish();
     } else {
-      stopSignal.addEventListener("abort", finish, { once: true });
+      stopSignal.addEventListener("abort", () => void finish(), { once: true });
     }
   });
+}
+
+async function settlesWithin(task: Promise<void>, timeoutMs: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<false>((resolve) => {
+    timer = setTimeout(() => resolve(false), timeoutMs);
+  });
+  try {
+    return await Promise.race([task.then(() => true, () => true), timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }

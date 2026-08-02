@@ -1,24 +1,20 @@
 #!/usr/bin/env node
 /**
- * `room` — the local Pi connector CLI.
+ * `room` — connect a local coding-agent harness to a planning room.
  *
  * Usage:
- *   room connect <roomId> <connectionCode>
+ *   room connect <roomId> <connectionCode> --agent <name>
  *
- * In the room UI, choose "Connect a Pi" and run the displayed command. This
- * connector makes an outbound connection to the room relay, becomes the active
- * agent, and relays handoffs between the room and the local agent command.
- *
- * Environment:
- *   CONVEX_URL             Convex deployment URL (e.g. https://<project>.convex.cloud)
- *   ROOM_AGENT_COMMAND     Command that turns a stdin handoff into a stdout plan
- *                          (defaults to an echo responder for smoke testing)
- *   ROOM_AGENT_SUPPORTS_VISION  true if the model reads images
+ * Built-in harnesses: pi, codex, claude, cursor, opencode.
+ * A custom executable receives the prompt on stdin:
+ *   room connect <roomId> <code> --agent custom --command ./my-agent --arg run
  */
 
+import { parseCliCommand, usage } from "./cliOptions.ts";
 import { runConnector, type Scheduler } from "./connector.ts";
+import { customHarness, getHarness } from "./harnesses.ts";
 import { ConvexRoomAgentClient } from "./roomClient.ts";
-import { CommandResponder, EchoResponder } from "./responder.ts";
+import { HarnessResponder } from "./responder.ts";
 
 const POLL_INTERVAL_MS = 4000;
 
@@ -36,51 +32,72 @@ function log(message: string): void {
 }
 
 async function main(): Promise<void> {
-  const [subcommand, roomIdArg, codeArg] = process.argv.slice(2);
-  if (subcommand !== "connect" || !roomIdArg || !codeArg) {
+  let command;
+  try {
+    command = parseCliCommand(process.argv.slice(2), process.env);
+  } catch (error) {
     // eslint-disable-next-line no-console
-    console.error("Usage: room connect <roomId> <connectionCode>");
-    process.exit(64);
+    console.error(error instanceof Error ? error.message : String(error));
+    // eslint-disable-next-line no-console
+    console.error(`\n${usage()}`);
+    process.exitCode = 64;
+    return;
   }
 
-  const roomId = roomIdArg.toUpperCase();
-  const connectionCode = codeArg;
-
-  for (const envVar of ["CONVEX_URL"]) {
-    if (!process.env[envVar]) {
-      // eslint-disable-next-line no-console
-      console.error(`Missing required env var: ${envVar}`);
-      process.exit(1);
-    }
+  if (command.kind === "help") {
+    // eslint-disable-next-line no-console
+    console.log(usage());
+    return;
   }
 
-  const client = new ConvexRoomAgentClient();
-  const command = process.env.ROOM_AGENT_COMMAND;
-  const responder = command ? new CommandResponder(command) : new EchoResponder();
+  if (!process.env.CONVEX_URL) {
+    // eslint-disable-next-line no-console
+    console.error("Missing required env var: CONVEX_URL");
+    process.exitCode = 1;
+    return;
+  }
+
+  const harness = command.agent.kind === "custom"
+    ? customHarness(command.agent.executable, command.agent.args)
+    : getHarness(command.agent.name);
 
   const controller = new AbortController();
   const stop = () => controller.abort();
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
 
-  log(`Connecting to room ${roomId}…`);
+  const client = new ConvexRoomAgentClient();
+  log(`Connecting ${harness.name} to room ${command.roomId}…`);
   try {
     await runConnector({
       client,
-      responder,
+      responder: new HarnessResponder(harness),
       scheduler: new RealScheduler(),
-      roomId,
-      connectionCode,
-      supportsVision: process.env.ROOM_AGENT_SUPPORTS_VISION === "true",
+      roomId: command.roomId,
+      connectionCode: command.connectionCode,
+      supportsVision: command.supportsVision,
       pollIntervalMs: POLL_INTERVAL_MS,
+      shutdownDrainTimeoutMs: command.shutdownDrainTimeoutMs,
       stopSignal: controller.signal,
       log,
     });
-    process.exit(0);
-  } catch (err) {
-    log(`Fatal: ${err instanceof Error ? err.message : String(err)}`);
-    process.exit(1);
+  } catch (error) {
+    log(`Fatal: ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 1;
+  } finally {
+    process.off("SIGINT", stop);
+    process.off("SIGTERM", stop);
+    try {
+      await client.close();
+    } catch (error) {
+      log(`Close failed: ${error instanceof Error ? error.message : String(error)}`);
+      process.exitCode = 1;
+    }
   }
 }
 
-void main();
+void main().catch((error: unknown) => {
+  // eslint-disable-next-line no-console
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+});

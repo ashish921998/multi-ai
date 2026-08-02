@@ -186,7 +186,7 @@ export default defineSchema({
     roomId: v.id("rooms"),
     /** Messages with seq > this are included. */
     boundarySeq: v.float64(),
-    /** Boundary the room advances to once Pi acknowledges the handoff. */
+    /** Boundary the room advances to once the agent acknowledges the handoff. */
     nextBoundarySeq: v.float64(),
     /** Sequence numbers folded into the batch, ascending. */
     includedSeqs: v.array(v.float64()),

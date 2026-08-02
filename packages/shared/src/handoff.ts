@@ -3,8 +3,8 @@
  *
  * "Send to agent" packages every participant message whose sequence number is
  * strictly greater than the previous handoff boundary into a single, stable
- * user-message envelope. The envelope is relayed to Pi verbatim — no AI
- * summarizer is added. The boundary advances only after Pi acknowledges
+ * user-message envelope. The envelope is relayed to the agent verbatim—no AI
+ * summarizer is added. The boundary advances only after the agent acknowledges
  * receipt, and a failed handoff can be retried with the same batch because the
  * output is a pure function of (messages, boundarySeq).
  */

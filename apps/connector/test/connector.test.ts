@@ -93,6 +93,20 @@ function flush(): Promise<void> {
   return new Promise((r) => setTimeout(r, 0));
 }
 
+async function waitForConnectorShutdown(done: Promise<void>): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      done,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error("connector shutdown stalled")), 200);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 function baseDeps(client: RoomAgentClient, responder: AgentResponder) {
   const controller = new AbortController();
   return {
@@ -105,6 +119,7 @@ function baseDeps(client: RoomAgentClient, responder: AgentResponder) {
       connectionCode: "ABCD-2345",
       supportsVision: false,
       pollIntervalMs: 5000,
+      shutdownDrainTimeoutMs: 20,
       stopSignal: controller.signal,
       log: () => {},
     },
@@ -129,6 +144,95 @@ describe("runConnector", () => {
     controller.abort();
     await done;
     expect(client.calls).toContain("disconnect");
+  });
+
+  it("disconnects after the shutdown drain limit when a handoff request stalls", async () => {
+    const client = makeClient({
+      async fetchHandoff() {
+        return await new Promise<never>(() => {});
+      },
+    });
+    const messages: string[] = [];
+    const { controller, deps } = baseDeps(client, chunkedResponder(["unused"]));
+    deps.log = (message) => messages.push(message);
+
+    const done = runConnector(deps);
+    await flush();
+    client.nextHandoff();
+    await flush();
+
+    controller.abort();
+    await waitForConnectorShutdown(done);
+
+    expect(client.calls).toContain("disconnect");
+    expect(messages).toContain("Handoff did not settle within 20ms; forcing disconnect.");
+  });
+
+  it("resolves after the shutdown limit when disconnect stalls", async () => {
+    const client = makeClient({
+      async disconnect() {
+        return await new Promise<never>(() => {});
+      },
+    });
+    const messages: string[] = [];
+    const { controller, deps } = baseDeps(client, chunkedResponder(["unused"]));
+    deps.log = (message) => messages.push(message);
+
+    const done = runConnector(deps);
+    await flush();
+    controller.abort();
+
+    await waitForConnectorShutdown(done);
+
+    expect(messages).toContain("Disconnect failed: timed out after 20ms.");
+    expect(messages.at(-1)).toBe("Disconnected.");
+  });
+
+  it("logs a disconnect failure and still resolves", async () => {
+    const client = makeClient({
+      async disconnect() {
+        throw new Error("disconnect mutation failed");
+      },
+    });
+    const messages: string[] = [];
+    const { controller, deps } = baseDeps(client, chunkedResponder(["unused"]));
+    deps.log = (message) => messages.push(message);
+
+    const done = runConnector(deps);
+    await flush();
+    controller.abort();
+    await done;
+
+    expect(messages).toContain("Disconnect failed: Error: disconnect mutation failed");
+    expect(messages.at(-1)).toBe("Disconnected.");
+  });
+
+  it("finalizes an active handoff before disconnecting on stop", async () => {
+    const client = makeClient();
+    const responder: AgentResponder = {
+      async *stream(_handoff, signal) {
+        yield "partial";
+        await new Promise<void>((_resolve, reject) => {
+          const stop = () => reject(new Error("agent stopped"));
+          if (signal.aborted) stop();
+          else signal.addEventListener("abort", stop, { once: true });
+        });
+      },
+    };
+    const { controller, deps } = baseDeps(client, responder);
+
+    const done = runConnector(deps);
+    await flush();
+    client.nextHandoff();
+    await flush();
+
+    controller.abort();
+    await done;
+
+    expect(client.calls.indexOf("respond:failed")).toBeGreaterThan(-1);
+    expect(client.calls.indexOf("respond:failed")).toBeLessThan(
+      client.calls.indexOf("disconnect"),
+    );
   });
 
   it("streams a handoff to the responder and completes it", async () => {

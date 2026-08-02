@@ -41,16 +41,16 @@ export function useRoom(session: RoomSession | null, roomId: string): {
 
   const sendToAgent = useCallback(async () => {
     if (!session) return;
-    setBanner({ kind: "info", text: "Sending the new discussion to Pi…" });
+    setBanner({ kind: "info", text: "Sending the new discussion to the agent…" });
     try {
       const result = await sendHandoff({ roomId, sessionToken: session.sessionToken });
       setBanner(
         result.retry
-          ? { kind: "warn", text: "Retrying the last handoff to Pi." }
-          : { kind: "success", text: "Sent to Pi. The response will stream into the timeline." },
+          ? { kind: "warn", text: "Retrying the last agent handoff." }
+          : { kind: "success", text: "Sent to the agent. Its response will stream into the timeline." },
       );
     } catch (e) {
-      setBanner({ kind: "warn", text: e instanceof Error ? e.message : "Could not send to Pi." });
+      setBanner({ kind: "warn", text: e instanceof Error ? e.message : "Could not send to the agent." });
     }
   }, [roomId, session, sendHandoff]);
 

@@ -274,7 +274,7 @@ textarea.input { resize: vertical; min-height: 90px; line-height: 1.55; }
 
 /* modal */
 .modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); display: grid; place-items: center; z-index: 50; padding: 20px; }
-.modal { width: 100%; max-width: 440px; margin: auto; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; }
+.modal { width: 100%; max-width: 440px; max-height: calc(100vh - 40px); overflow-y: auto; margin: auto; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; }
 .modal h3 { margin: 0 0 6px; font-size: 18px; }
 .code-block { font-family: ui-monospace, SFMono-Regular, monospace; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin: 12px 0; word-break: break-all; }
 

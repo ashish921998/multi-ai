@@ -1,137 +1,110 @@
-# V1 Room Backend Handoff
+# Room Backend Handoff
 
-This document explains where a room lives and how `/room create` connects people without exposing a developer's laptop.
+This document explains where a room lives and how local coding-agent harnesses
+participate without exposing a developer's laptop.
 
 ## The short version
 
-`/room create` creates a room in the cloud. It does **not** host a website on the host's laptop and does **not** require an ngrok-style tunnel.
-
-The recommended V1 shape is:
+The browser and connector both make outbound connections to Convex:
 
 ```text
-Pi on participant laptop  ──outbound connection──┐
-                                                  │
-Browsers ──HTTPS/realtime──> Supabase cloud <─────┘
-                                  │
-                         temporary room data
-                         and screenshots
+Codex / Claude Code / Cursor / OpenCode / Pi / custom command
+                         │
+                  local connector
+                         │ outbound
+                         ▼
+Browsers ───────────▶ Convex cloud
+                         │
+             rooms · documents · screenshots
 ```
 
-The local Pi connector makes an outbound connection to the cloud. Because the connection starts from the laptop, the laptop does not need a public IP, open port, or inbound tunnel.
+The laptop needs no public address, open port, or tunnel. Repository access,
+provider credentials, and the coding-agent process stay local.
 
-## What is hosted where?
+## Hosted parts
 
 ### Browser app
 
-Deploy the frontend to a normal web host such as Vercel or Cloudflare Pages. Participants open a URL such as:
+The static React app runs on Cloudflare Pages. Participants open a room URL, enter
+the password and a display name, then receive a session-scoped reactive view.
+
+### Convex backend
+
+Convex stores rooms, participants, messages, handoffs, agent leases, versioned
+workspace documents, and screenshot metadata. Private storage holds screenshot
+bytes. Queries and mutations enforce room sessions, one-time connection codes,
+one active-agent lease, optimistic document concurrency, and cleanup.
+
+### Local agent connector
+
+A participant chooses a harness in the room and runs:
 
 ```text
-https://app.example.com/r/room-id
+room connect <room-id> <one-time-code> --agent <harness>
 ```
 
-### Supabase project
+Built-in harnesses are `codex`, `claude`, `cursor`, `opencode`, and `pi`. A custom
+executable can receive the same prompt on stdin. The connector:
 
-Use one hosted Supabase project for V1:
+1. redeems the one-time code and claims the active-agent lease;
+2. heartbeats while connected;
+3. receives deterministic room handoffs reactively;
+4. starts the selected harness beside the repository;
+5. streams plain-text output into the room;
+6. writes `plan.md` only against the exact version included in the handoff.
 
-- **Postgres** stores rooms, participants, messages, handoffs, agent status, and expiry timestamps.
-- **Realtime** broadcasts new messages, presence, Pi status, and streamed responses.
-- **Storage** holds screenshots in a private bucket.
-- **Edge Functions** handle privileged operations such as creating rooms, checking passwords, issuing connection codes, and cleanup.
+The harness is the only varying part. Room transport, retries, attachments,
+streaming, and document concurrency stay in the shared connector core.
 
-Supabase is a hosted backend service. We do not run a server or database on the host's laptop.
+## Room lifecycle
 
-### Local Pi connector
+1. A participant creates a temporary room in the browser.
+2. The backend returns a random room ID, password, and expiry.
+3. Other participants join with the URL and password.
+4. Any participant may issue a one-time agent connection code.
+5. One local connector claims the active-agent lease.
+6. Participants discuss the task and attach screenshots.
+7. **Send to agent** packages messages after the previous completed boundary.
+8. The connector gives that handoff and the current `plan.md` snapshot to the
+   selected harness.
+9. The response streams to every browser and becomes a new document version if
+   the snapshot is still current.
 
-Pi remains local. A Pi extension or command connects to the room service and relays messages:
+If a participant edits the document while the agent is responding, the stale
+agent write is rejected rather than overwriting the participant. The streamed
+response remains in the discussion for recovery.
 
-```text
-/room create
-/room connect <one-time-code>
-/room disconnect
-```
+If the active connector disconnects or misses its lease heartbeat, another
+participant can issue a code and connect any supported harness.
 
-The connector is responsible for passing a handoff to Pi as a normal user message and sending Pi's response back to the room. The repository, terminal, Pi session, provider credentials, and API keys stay on that participant's laptop.
+## Screenshot handling
 
-## What happens during `/room create`?
+Screenshots remain private in Convex storage. For a vision-enabled connector, a
+short-lived URL is resolved and downloaded into a temporary local directory. The
+prompt contains those local paths. The directory is deleted after the harness
+finishes.
 
-1. Pi calls the room backend to create a room.
-2. The backend creates a random room id, random password, and expiry timestamp.
-3. The backend returns a join URL and password.
-4. Pi opens the URL in the browser.
-5. The local Pi connector establishes an outbound realtime connection and becomes the active agent.
-6. The host shares the URL and password.
+## Temporary data
 
-The URL is only an address. The password is the second part of the room access check.
+Rooms and their documents, messages, connection rows, and private screenshot
+objects are deleted 30 days after the room's last activity.
 
-## What happens when someone joins?
+The service does not receive or retain:
 
-1. They open the shared URL.
-2. They enter the room password and a display name.
-3. The browser asks the backend to verify access.
-4. The browser subscribes to the room's realtime events.
-5. The backend sends the current room timeline and participant presence.
+- repositories or worktrees;
+- terminal output other than the response intentionally sent to the room;
+- harness credentials;
+- provider API keys.
 
-They do not install Pi, open a port, or connect to the host's laptop.
-
-## What happens when someone sends to Pi?
-
-1. Participants write messages and attach screenshots.
-2. The room stores each message with a sequence number.
-3. Someone clicks **Send to agent**.
-4. The backend collects messages after the previous handoff boundary.
-5. It sends one deterministic handoff to the active Pi connector.
-6. The connector gives Pi a normal user message with the room context.
-7. Pi streams its response back through the connector.
-8. The backend stores and broadcasts the response to every browser.
-
-If the active Pi disconnects, the room remains usable. Another participant can connect their own local Pi with a one-time code and take the active slot.
-
-## What data is temporary?
-
-The backend retains room messages and screenshots until 30 days after the room's last activity. A cleanup job then deletes the room data and private screenshot objects.
-
-We do not retain:
-
-- Repositories
-- Worktrees
-- Terminal output outside Pi responses sent to the room
-- Pi credentials
-- Provider API keys
-
-A participant's Pi provider may separately retain the handoff according to that provider's policy.
+The selected model provider may separately retain prompts according to its own
+policy.
 
 ## Why this is not a tunnel
 
-A tunnel makes a laptop reachable from the public internet. We do not need that. The cloud relay is reachable by everyone, and Pi connects outward to it:
-
 ```text
-Good:  laptop ──outbound──> cloud relay <──outbound── other browsers
-Avoid: internet ──inbound tunnel──> laptop
+Good:  laptop ──outbound──▶ cloud relay ◀──outbound── browsers
+Avoid: internet ──inbound tunnel──▶ laptop
 ```
 
-This is similar to how a desktop chat client maintains a connection to a chat service.
-
-## The backend concepts worth learning
-
-Learn these in order:
-
-1. **HTTP requests:** browser or Pi asks the backend to create a room or send data.
-2. **Database rows:** persistent records for rooms, messages, and participants.
-3. **Realtime/WebSockets:** a long-lived connection for instant room updates.
-4. **Object storage:** a file bucket for screenshots, separate from the database.
-5. **Authentication and authorization:** password verification, session tokens, and row-level access rules.
-6. **Signed URLs:** temporary links that let an authorized participant view a private screenshot.
-7. **TTL cleanup:** deleting records after their expiry time.
-
-You do not need Ray, Kubernetes, a custom distributed system, or a public server running on a laptop for this V1.
-
-## Suggested implementation order
-
-1. Deploy a blank browser app.
-2. Create a Supabase project and one private screenshot bucket.
-3. Add room creation and password-protected joining.
-4. Add persisted text messages and realtime updates.
-5. Add the local Pi connector and one active-agent connection.
-6. Add handoffs and streamed Pi responses.
-7. Add screenshot uploads and cleanup.
-8. Add reconnect, takeover, rate limits, and production hardening.
+The participant's laptop is not publicly reachable. The local connector behaves
+like a desktop chat client and communicates through outbound connections.

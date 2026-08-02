@@ -2,7 +2,7 @@
  * Random identifier and secret generation.
  *
  * Every random value uses the runtime WebCrypto CSPRNG so the same code runs
- * in the browser, in the local Pi connector (Node 20+), and in Deno Edge
+ * in the browser, in the local agent connector (Node 20+), and in Deno Edge
  * Functions. All codes use an *unambiguous* alphabet (no 0/O/1/I) so they can
  * be read aloud or typed from a screenshot without ambiguity.
  */
