@@ -45,8 +45,38 @@ describe("parseCliCommand", () => {
     ).toMatchObject({ shutdownDrainTimeoutMs: 2500 });
   });
 
-  it("rejects an invalid shutdown drain limit", () => {
+  it("rejects shutdown drain limits outside the supported timer range", () => {
+    for (const value of ["", "-1", "2147483648"]) {
+      expect(() =>
+        parseCliCommand(
+          [
+            "connect",
+            "ROOM123",
+            "ABCD-2345",
+            "--agent",
+            "codex",
+            `--shutdown-drain-timeout-ms=${value}`,
+          ],
+          {},
+        ),
+      ).toThrow(
+        "Shutdown drain timeout must be an integer from 0 through 2147483647 milliseconds.",
+      );
+    }
+  });
+
+  it("rejects an empty environment shutdown drain limit", () => {
     expect(() =>
+      parseCliCommand(["connect", "ROOM123", "ABCD-2345", "--agent", "codex"], {
+        ROOM_AGENT_SHUTDOWN_DRAIN_TIMEOUT_MS: "   ",
+      }),
+    ).toThrow(
+      "Shutdown drain timeout must be an integer from 0 through 2147483647 milliseconds.",
+    );
+  });
+
+  it("accepts the maximum supported shutdown drain limit", () => {
+    expect(
       parseCliCommand(
         [
           "connect",
@@ -54,11 +84,11 @@ describe("parseCliCommand", () => {
           "ABCD-2345",
           "--agent",
           "codex",
-          "--shutdown-drain-timeout-ms=-1",
+          "--shutdown-drain-timeout-ms=2147483647",
         ],
         {},
       ),
-    ).toThrow("Shutdown drain timeout must be a non-negative integer");
+    ).toMatchObject({ shutdownDrainTimeoutMs: 2_147_483_647 });
   });
 
   it("parses a custom executable and keeps each fixed argument separate", () => {

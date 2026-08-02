@@ -25,7 +25,7 @@ import {
 } from "@multi-ai/shared";
 import { fail } from "./lib/errors";
 import { lookupRoomByCode } from "./lib/room";
-import { findHolder, isHealthy, reapStaleHolder } from "./lib/agent";
+import { findHolder, isHealthy, reapStaleHolder, releaseHolder } from "./lib/agent";
 
 // ---------------------------------------------------------------------------
 // connect — redeem a one-time code and acquire the active slot.
@@ -138,14 +138,14 @@ export const disconnect = mutation({
     const conn = await ctx.db.get(args.agentConnectionId);
     if (!conn) return { ok: true }; // idempotent
     if (conn.status === "active") {
-      await ctx.db.patch(args.agentConnectionId, {
-        status: "disconnected",
-        releasedAt: Date.now(),
-      });
-      // Only clear the slot if this connection still holds it.
       const room = await ctx.db.get(conn.roomId);
       if (room && room.activeAgentConnectionId === args.agentConnectionId) {
-        await ctx.db.patch(room._id, { activeAgentConnectionId: undefined });
+        await releaseHolder(ctx.db, room, conn);
+      } else {
+        await ctx.db.patch(args.agentConnectionId, {
+          status: "disconnected",
+          releasedAt: Date.now(),
+        });
       }
     }
     return { ok: true };

@@ -119,9 +119,9 @@ be terminated. A process that deliberately detaches into a separate OS session m
 escape cleanup; the connector stops waiting on its inherited stdout after the harness
 exits, and custom harnesses should not detach persistent processes.
 
-On SIGINT/SIGTERM, the connector gives an active handoff 5 seconds to record its final
-status before forcing disconnect. Configure this shutdown-only bound with
-`--shutdown-drain-timeout-ms=<milliseconds>` or
+On SIGINT/SIGTERM, the connector gives an active handoff up to 5 seconds to record its
+final status, then gives disconnect the same bounded wait. Configure this shutdown-only
+bound with `--shutdown-drain-timeout-ms=<milliseconds>` or
 `ROOM_AGENT_SHUTDOWN_DRAIN_TIMEOUT_MS`; it does not limit normal harness runtime.
 
 Add `--supports-vision` when the selected model can read the temporary image paths in

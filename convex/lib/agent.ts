@@ -11,6 +11,9 @@
 import type { DatabaseReader, DatabaseWriter } from "../_generated/server";
 import type { Doc } from "../_generated/dataModel";
 import { evaluateLease } from "@multi-ai/shared";
+import { isActiveHandoff } from "./status";
+
+const FAILED_RESPONSE_SUFFIX = "\n\n_(response failed — retry available)_";
 
 /** The connection currently holding the room's active slot, or null. */
 export async function findHolder(
@@ -46,12 +49,52 @@ export async function reapStaleHolder(
   if (!holder) return false;
   if (isHealthy(holder, now)) return false;
 
+  await releaseHolder(db, room, holder, now);
+  return true;
+}
+
+/**
+ * Releases an agent and atomically makes its unfinished handoff retryable.
+ */
+export async function releaseHolder(
+  db: DatabaseWriter,
+  room: Doc<"rooms">,
+  holder: Doc<"agentConnections">,
+  now: number = Date.now(),
+): Promise<void> {
   await db.patch(holder._id, {
     status: "disconnected",
     releasedAt: now,
   });
-  await db.patch(room._id, { activeAgentConnectionId: undefined });
-  return true;
+
+  if (room.activeAgentConnectionId !== holder._id) return;
+
+  let releaseHandoff = false;
+  if (room.activeHandoffId) {
+    const handoff = await db.get(room.activeHandoffId);
+    if (
+      handoff &&
+      handoff.agentConnectionId === holder._id &&
+      isActiveHandoff(handoff.status)
+    ) {
+      await db.patch(handoff._id, { status: "failed" });
+      if (handoff.agentMessageId) {
+        const message = await db.get(handoff.agentMessageId);
+        if (message) {
+          await db.patch(handoff.agentMessageId, {
+            status: "complete",
+            text: `${message.text}${FAILED_RESPONSE_SUFFIX}`,
+          });
+        }
+      }
+      releaseHandoff = true;
+    }
+  }
+
+  await db.patch(room._id, {
+    activeAgentConnectionId: undefined,
+    ...(releaseHandoff ? { activeHandoffId: undefined } : {}),
+  });
 }
 
 /** Maps a stored connection doc to the @multi-ai/shared lease shape. */

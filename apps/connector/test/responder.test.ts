@@ -247,7 +247,7 @@ describe("HarnessResponder", () => {
     async () => {
       const script = [
         'const { spawn } = require("node:child_process");',
-        `const descendant = spawn(${JSON.stringify(process.execPath)}, ["-e", "setTimeout(() => {}, 1_000)"], { detached: true, stdio: ["ignore", "inherit", "ignore"] });`,
+        `const descendant = spawn(${JSON.stringify(process.execPath)}, ["-e", "setTimeout(() => {}, 5_000)"], { detached: true, stdio: ["ignore", "inherit", "ignore"] });`,
         "descendant.unref();",
         'process.stdout.write("done");',
       ].join(" ");
@@ -263,7 +263,7 @@ describe("HarnessResponder", () => {
       }
 
       expect(chunks.join("")).toBe("done");
-      expect(Date.now() - startedAt).toBeLessThan(500);
+      expect(Date.now() - startedAt).toBeLessThan(1_000);
     },
   );
 

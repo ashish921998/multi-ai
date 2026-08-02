@@ -159,6 +159,50 @@ describe("runConnector", () => {
     expect(messages).toContain("Handoff did not settle within 20ms; forcing disconnect.");
   });
 
+  it("resolves after the shutdown limit when disconnect stalls", async () => {
+    const client = makeClient({
+      async disconnect() {
+        return await new Promise<never>(() => {});
+      },
+    });
+    const messages: string[] = [];
+    const { controller, deps } = baseDeps(client, chunkedResponder(["unused"]));
+    deps.log = (message) => messages.push(message);
+
+    const done = runConnector(deps);
+    await flush();
+    controller.abort();
+
+    await Promise.race([
+      done,
+      new Promise<never>((_resolve, reject) =>
+        setTimeout(() => reject(new Error("connector shutdown stalled")), 200),
+      ),
+    ]);
+
+    expect(messages).toContain("Disconnect failed: timed out after 20ms.");
+    expect(messages.at(-1)).toBe("Disconnected.");
+  });
+
+  it("logs a disconnect failure and still resolves", async () => {
+    const client = makeClient({
+      async disconnect() {
+        throw new Error("disconnect mutation failed");
+      },
+    });
+    const messages: string[] = [];
+    const { controller, deps } = baseDeps(client, chunkedResponder(["unused"]));
+    deps.log = (message) => messages.push(message);
+
+    const done = runConnector(deps);
+    await flush();
+    controller.abort();
+    await done;
+
+    expect(messages).toContain("Disconnect failed: Error: disconnect mutation failed");
+    expect(messages.at(-1)).toBe("Disconnected.");
+  });
+
   it("finalizes an active handoff before disconnecting on stop", async () => {
     const client = makeClient();
     const responder: AgentResponder = {

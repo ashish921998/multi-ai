@@ -6,6 +6,7 @@ import {
 } from "@multi-ai/shared";
 
 export const DEFAULT_SHUTDOWN_DRAIN_TIMEOUT_MS = 5_000;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 export type AgentSelection =
   | { kind: "builtIn"; name: HarnessName }
@@ -103,8 +104,10 @@ export function parseCliCommand(
 function readShutdownDrainTimeout(raw: string | undefined): number {
   if (raw === undefined) return DEFAULT_SHUTDOWN_DRAIN_TIMEOUT_MS;
   const timeout = Number(raw);
-  if (!Number.isSafeInteger(timeout) || timeout < 0) {
-    throw new Error("Shutdown drain timeout must be a non-negative integer in milliseconds.");
+  if (raw.trim() === "" || !Number.isInteger(timeout) || timeout < 0 || timeout > MAX_TIMER_DELAY_MS) {
+    throw new Error(
+      `Shutdown drain timeout must be an integer from 0 through ${MAX_TIMER_DELAY_MS} milliseconds.`,
+    );
   }
   return timeout;
 }

@@ -208,14 +208,19 @@ export async function runConnector(deps: ConnectorDeps): Promise<void> {
           `Handoff did not settle within ${deps.shutdownDrainTimeoutMs}ms; forcing disconnect.`,
         );
       }
-      try {
-        await client.disconnect(agentConnectionId);
-      } catch (error) {
-        log(`Disconnect failed: ${String(error)}`);
-      } finally {
-        log("Disconnected.");
-        resolve();
+      let disconnectError: unknown;
+      const disconnectTask = Promise.resolve()
+        .then(() => client.disconnect(agentConnectionId))
+        .catch((error: unknown) => {
+          disconnectError = error;
+        });
+      if (!(await settlesWithin(disconnectTask, deps.shutdownDrainTimeoutMs))) {
+        log(`Disconnect failed: timed out after ${deps.shutdownDrainTimeoutMs}ms.`);
+      } else if (disconnectError !== undefined) {
+        log(`Disconnect failed: ${String(disconnectError)}`);
       }
+      log("Disconnected.");
+      resolve();
     };
     if (stopSignal.aborted) {
       void finish();
